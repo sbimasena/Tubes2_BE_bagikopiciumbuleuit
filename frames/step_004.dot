@@ -3,9 +3,9 @@ digraph G {
  "Rain" -> "Cloud";
  "Cloud" -> "Atmosphere";
  "Atmosphere" -> "Air";
- "Atmosphere" [shape=box, style=filled, fillcolor=white];
- "Air" [shape=box, style=filled, fillcolor=lightgreen];
  "Rain" [shape=box, style=filled, fillcolor=lightskyblue];
  "Cloud" [shape=box, style=filled, fillcolor=lightskyblue];
+ "Atmosphere" [shape=box, style=filled, fillcolor=white];
+ "Air" [shape=box, style=filled, fillcolor=lightgreen];
  rankdir=TB;
 }

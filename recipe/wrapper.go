@@ -20,9 +20,6 @@ func FindShortestRecipe(target string, elements map[string][][]string, basicElem
 		fmt.Println("No recipe found")
 		return nil
 	}
-
-	fmt.Printf("Found recipe with %d steps\n", len(result[0]))
-
 	// Execute visualization synchronously to ensure it completes
 	TraceLive(result[0], elements, basicElements)
 

@@ -58,7 +58,6 @@ func main() {
 
 	// Shortest Path
 	fmt.Println("== Shortest Recipe ==")
-	fmt.Println("Finding shortest recipe for Rain...")
 	shortest := recipe.FindShortestRecipe("Rain", elements, basicElements)
 	if shortest != nil {
 		fmt.Printf("Found recipe with %d steps: %v\n", len(shortest), shortest)
