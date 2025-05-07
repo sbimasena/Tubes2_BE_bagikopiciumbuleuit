@@ -59,9 +59,7 @@ func main() {
 	// Shortest Path
 	fmt.Println("== Shortest Recipe ==")
 	shortest := recipe.FindShortestRecipe("Rain", elements, basicElements)
-	if shortest != nil {
-		fmt.Printf("Found recipe with %d steps: %v\n", len(shortest), shortest)
-	} else {
+	if shortest == nil {
 		fmt.Println("No recipe found")
 	}
 
@@ -69,11 +67,7 @@ func main() {
 	fmt.Println("\n== Multiple Recipes (max 3) ==")
 	fmt.Println("Finding multiple recipes for Rain...")
 	multiple := recipe.FindMultipleRecipesConcurrent("Rain", elements, basicElements, 3)
-	if len(multiple) > 0 {
-		for i, path := range multiple {
-			fmt.Printf("Recipe %d (%d steps): %v\n", i+1, len(path), path)
-		}
-	} else {
+	if len(multiple) == 0 {
 		fmt.Println("No recipes found")
 	}
 

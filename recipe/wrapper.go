@@ -2,95 +2,133 @@ package recipe
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
 // FindShortestRecipe finds the shortest recipe path to a target element
-// Uses non-concurrent DFS as specified
 func FindShortestRecipe(target string, elements map[string][][]string, basicElements map[string]bool) []string {
 	fmt.Println("Finding shortest recipe for", target)
 
-	visited := map[string]bool{}
-	result := [][]string{}
+	// Jika target sudah elemen dasar, kembalikan langsung
+	if basicElements[target] {
+		fmt.Printf("Found recipe with 1 step\n")
+		recipe := []string{target}
+		// Tambahkan output yang diinginkan
+		fmt.Printf("%s (basic element)\n", target)
+		TraceLive(recipe, elements, basicElements)
+		return recipe
+	}
 
-	// Use the optimized DFS algorithm - pass result by reference
-	dfsOptimized(target, elements, basicElements, []string{target}, visited, 1, true, &result, true)
+	// Memoization untuk menyimpan resep terpendek yang sudah ditemukan
+	memo := make(map[string][]string)
+	visited := make(map[string]bool)
 
-	if len(result) == 0 {
+	// Juga simpan informasi tentang kombinasi yang digunakan
+	combinations := make(map[string][]string)
+
+	// Melakukan DFS
+	recipe := dfsWithMemo(target, elements, basicElements, memo, visited, combinations)
+
+	if len(recipe) == 0 {
 		fmt.Println("No recipe found")
 		return nil
 	}
-	// Execute visualization synchronously to ensure it completes
-	TraceLive(result[0], elements, basicElements)
 
-	return result[0]
+	fmt.Printf("Found recipe with %d steps\n", len(recipe))
+
+	// Tampilkan resep dalam format yang diinginkan
+	printFormattedRecipe(recipe, combinations)
+
+	TraceLive(recipe, elements, basicElements)
+	return recipe
 }
 
-// FindMultipleRecipesConcurrent finds multiple recipes for a target element using concurrency
 func FindMultipleRecipesConcurrent(target string, elements map[string][][]string, basicElements map[string]bool, maxRecipes int) [][]string {
 	fmt.Printf("Finding up to %d recipes for %s\n", maxRecipes, target)
 
-	var wg sync.WaitGroup
+	var result [][]string
 	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxRecipes)
 
-	result := [][]string{}
-
-	// Get recipes for the target
-	recipes, ok := elements[target]
-	if !ok {
+	recipes := elements[target]
+	if len(recipes) == 0 {
 		return nil
 	}
 
-	// Use a buffered channel to limit the number of concurrent goroutines
-	semaphore := make(chan struct{}, 8)
-
 	for _, recipe := range recipes {
-		semaphore <- struct{}{} // Acquire token
+		sem <- struct{}{}
 		wg.Add(1)
 
 		go func(recipe []string) {
 			defer wg.Done()
-			defer func() { <-semaphore }() // Release token
+			defer func() { <-sem }()
 
-			tempPath := []string{target}
+			memo := make(map[string][]string)
+			combinations := make(map[string][]string)
+			visited := make(map[string]bool)
+
+			fullPath := []string{}
 			success := true
 
-			// Process each ingredient in the recipe
 			for _, ing := range recipe {
-				subVisited := map[string]bool{}
-				subResult := [][]string{}
-
-				// Find a path for this ingredient
-				dfsOptimized(ing, elements, basicElements, append(tempPath, ing), subVisited, 1, true, &subResult, true)
-
-				// If no valid paths for this ingredient, recipe fails
-				if len(subResult) == 0 {
+				path := dfsWithMemo(ing, elements, basicElements, memo, visited, combinations)
+				if path == nil {
 					success = false
 					break
 				}
-
-				// Update our path with successful subpath
-				tempPath = subResult[0]
+				fullPath = append(fullPath, path...)
 			}
 
-			// If we successfully built a path for this recipe
 			if success {
+				fullPath = append(fullPath, target)
+
 				mu.Lock()
 				if len(result) < maxRecipes {
-					result = append(result, tempPath)
+					result = append(result, fullPath)
+					fmt.Printf("\nRecipe %d (%d steps):\n", len(result), len(fullPath))
+					printFormattedRecipe(fullPath, combinations)
 				}
 				mu.Unlock()
 			}
 		}(recipe)
+
+		mu.Lock()
+		if len(result) >= maxRecipes {
+			mu.Unlock()
+			break
+		}
+		mu.Unlock()
 	}
 
-	// Wait for all goroutines to finish
 	wg.Wait()
+	return result
+}
 
-	// Visualize synchronously if we have results
-	if len(result) > 0 {
-		TraceLive(result[0], elements, basicElements)
+func printFormattedRecipe(recipe []string, combinations map[string][]string) {
+	fmt.Println("Recipe steps:")
+	used := make(map[string]bool)
+
+	for _, elem := range recipe {
+		if combo, found := combinations[elem]; found {
+			// hanya print kalau semua bahan combo-nya udah ada di used
+			ready := true
+			for _, part := range combo {
+				if !used[part] {
+					ready = false
+					break
+				}
+			}
+			if ready {
+				fmt.Printf("* %s -> %s\n", strings.Join(combo, " + "), elem)
+				used[elem] = true
+			}
+		} else {
+			fmt.Printf("* %s (basic element)\n", elem)
+			used[elem] = true
+		}
 	}
 
-	return result
+	fmt.Printf("Found recipe with %d steps: %v\n", len(recipe), recipe)
 }

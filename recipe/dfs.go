@@ -29,130 +29,92 @@ var (
 	visualMutex sync.Mutex
 )
 
-// Optimized DFS with visual tracing
-func dfsOptimized(
-	target string,
-	elements map[string][][]string,
-	basicElements map[string]bool,
-	path []string,
-	visited map[string]bool,
-	maxRecipes int,
-	stopEarly bool,
-	result *[][]string,
-	enableVisual bool, // Flag to enable/disable visualization
-) {
-	// Visited check to prevent cycles
-	if visited[target] {
-		return
+func dfsWithMemo(target string, elements map[string][][]string, basicElements map[string]bool,
+	memo map[string][]string, visited map[string]bool,
+	combinations map[string][]string) []string {
+
+	// Jika sudah dihitung sebelumnya, kembalikan hasil dari memo
+	if recipe, found := memo[target]; found {
+		return recipe
 	}
 
-	// Early stop conditions
-	if stopEarly && len(*result) > 0 {
-		return
-	}
-	if !stopEarly && len(*result) >= maxRecipes {
-		return
-	}
-
-	// Mark as visited
-	visited[target] = true
-
-	// Update visualization if enabled
-	if enableVisual {
-		// Add edge from parent to this node
-		if len(path) > 1 {
-			parent := path[len(path)-2]
-			// We want parent -> child direction for visualization
-			AddEdge(parent, target)
-		}
-
-		// Mark this node as currently being visited
-		MarkVisited(target, true)
-
-		// Capture the current state
-		CaptureFrame(elements, basicElements)
-	}
-
-	// Check if we've reached a basic element
+	// Jika target adalah elemen dasar
 	if basicElements[target] {
-		complete := append([]string{}, path...)
-		*result = append(*result, complete)
-
-		// Clear visited mark before returning
-		if enableVisual {
-			MarkVisited(target, false)
-			CaptureFrame(elements, basicElements)
-		}
-
-		visited[target] = false
-		return
+		memo[target] = []string{target}
+		return memo[target]
 	}
 
-	// Get recipes for this target
-	recipes, ok := elements[target]
-	if !ok {
-		// Clear visited mark before returning
-		if enableVisual {
-			MarkVisited(target, false)
-			CaptureFrame(elements, basicElements)
-		}
+	// Tandai sebagai dikunjungi untuk menghindari siklus
+	if visited[target] {
+		return nil
+	}
+	visited[target] = true
+	defer func() { visited[target] = false }()
 
-		visited[target] = false
-		return
+	// Periksa kombinasi yang dapat membuat target
+	targetCombos, exists := elements[target]
+	if !exists {
+		memo[target] = nil
+		return nil
 	}
 
-	// Try each recipe
-	for _, recipe := range recipes {
-		success := true
-		tempPath := append([]string{}, path...)
+	var shortestRecipe []string
+	var bestCombo []string
 
-		// Try each ingredient in the recipe
-		for _, ing := range recipe {
-			before := len(*result)
+	// Coba setiap kombinasi
+	for _, combo := range targetCombos {
+		var recipesFromCombo [][]string
 
-			// Recursively find path for this ingredient
-			dfsOptimized(ing, elements, basicElements, append(tempPath, ing), visited, 1, true, result, enableVisual)
-
-			// Check if we found a path
-			if len(*result) == before {
-				success = false
+		// Dapatkan resep untuk setiap elemen dalam kombinasi
+		allValid := true
+		for _, elem := range combo {
+			elemRecipe := dfsWithMemo(elem, elements, basicElements, memo, visited, combinations)
+			if len(elemRecipe) == 0 {
+				allValid = false
 				break
 			}
-
-			// Update our path with the successful subpath
-			tempPath = (*result)[len(*result)-1]
+			recipesFromCombo = append(recipesFromCombo, elemRecipe)
 		}
 
-		// If we successfully built a path for this recipe
-		if success {
-			if !stopEarly {
-				*result = append(*result, tempPath)
+		if !allValid {
+			continue
+		}
 
-				// Capture state after finding a complete recipe
-				if enableVisual {
-					CaptureFrame(elements, basicElements)
+		// Gabungkan semua resep
+		combinedRecipe := []string{}
+		for _, recipe := range recipesFromCombo {
+			// Tambahkan elemen yang belum ada di combinedRecipe
+			for _, elem := range recipe {
+				// Cek apakah elemen sudah ada di combinedRecipe
+				found := false
+				for _, existing := range combinedRecipe {
+					if existing == elem {
+						found = true
+						break
+					}
+				}
+				if !found {
+					combinedRecipe = append(combinedRecipe, elem)
 				}
 			}
+		}
 
-			// Stop if we have enough recipes or stopEarly is set
-			if stopEarly || len(*result) >= maxRecipes {
-				// Clear visited mark before returning
-				if enableVisual {
-					MarkVisited(target, false)
-					CaptureFrame(elements, basicElements)
-				}
+		// Tambahkan target ke resep
+		combinedRecipe = append(combinedRecipe, target)
 
-				visited[target] = false
-				return
-			}
+		// Update shortestRecipe jika ini adalah resep pertama atau lebih pendek
+		if len(shortestRecipe) == 0 || len(combinedRecipe) < len(shortestRecipe) {
+			shortestRecipe = combinedRecipe
+			bestCombo = combo
 		}
 	}
 
-	// Clear visited mark before backtracking
-	if enableVisual {
-		MarkVisited(target, false)
-		CaptureFrame(elements, basicElements)
+	// Simpan kombinasi terbaik yang digunakan untuk membuat target
+	if len(bestCombo) > 0 {
+		combinations[target] = bestCombo
 	}
 
-	visited[target] = false
+	// Simpan hasil ke memo
+	memo[target] = shortestRecipe
+	return shortestRecipe
 }
