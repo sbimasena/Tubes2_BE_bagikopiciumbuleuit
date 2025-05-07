@@ -1,0 +1,9 @@
+digraph G {
+ node [shape=box, style=filled];
+ "Rain" -> "Cloud";
+ "Cloud" -> "Atmosphere";
+ "Rain" [shape=box, style=filled, fillcolor=lightskyblue];
+ "Cloud" [shape=box, style=filled, fillcolor=lightskyblue];
+ "Atmosphere" [shape=box, style=filled, fillcolor=lightskyblue];
+ rankdir=TB;
+}
