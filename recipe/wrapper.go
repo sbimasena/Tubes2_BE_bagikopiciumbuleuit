@@ -87,6 +87,7 @@ func FindMultipleRecipesConcurrent(target string, elements map[string][][]string
 				mu.Lock()
 				if len(result) < maxRecipes {
 					result = append(result, fullPath)
+					combinations[target] = recipe
 					fmt.Printf("\nRecipe %d (%d steps):\n", len(result), len(fullPath))
 					printFormattedRecipe(fullPath, combinations)
 				}
