@@ -7,7 +7,7 @@ import (
 )
 
 // FindShortestRecipe finds the shortest recipe path to a target element
-func FindShortestRecipe(target string, elements map[string][][]string, basicElements map[string]bool) []string {
+func FindShortestRecipe(target string, elements map[string][][]string, basicElements map[string]bool, dfs bool) []string {
 	fmt.Println("Finding shortest recipe for", target)
 
 	// Jika target sudah elemen dasar, kembalikan langsung
@@ -28,19 +28,22 @@ func FindShortestRecipe(target string, elements map[string][][]string, basicElem
 	combinations := make(map[string][]string)
 
 	// Melakukan DFS
-	recipe := dfsWithMemo(target, elements, basicElements, memo, visited, combinations)
-
+	var recipe []string
+	if dfs {
+		recipe = dfsWithMemo(target, elements, basicElements, memo, visited, combinations)
+	} else {
+		recipe, combinations = bfsWithFlattenedRecipe(target, elements, basicElements)
+		recipe = topologicalSort(combinations, recipe)
+	}
 	if len(recipe) == 0 {
 		fmt.Println("No recipe found")
 		return nil
 	}
 
-	fmt.Printf("Found recipe with %d steps\n", len(recipe))
-
 	// Tampilkan resep dalam format yang diinginkan
 	printFormattedRecipe(recipe, combinations)
 
-	TraceLive(recipe, elements, basicElements)
+	//TraceLive(recipe, elements, basicElements)
 	return recipe
 }
 
@@ -132,4 +135,55 @@ func printFormattedRecipe(recipe []string, combinations map[string][]string) {
 	}
 
 	fmt.Printf("Found recipe with %d steps: %v\n", len(recipe), recipe)
+}
+
+func topologicalSort(combinations map[string][]string, recipe []string) []string {
+	inDegree := make(map[string]int)
+	graph := make(map[string][]string)
+
+	// Build graph and in-degree map
+	for result, ingredients := range combinations {
+		for _, ing := range ingredients {
+			graph[ing] = append(graph[ing], result)
+			inDegree[result]++
+		}
+	}
+
+	// Start with all nodes with in-degree 0
+	queue := []string{}
+	for _, elem := range recipe {
+		if inDegree[elem] == 0 {
+			queue = append(queue, elem)
+		}
+	}
+
+	var sorted []string
+	seen := make(map[string]bool)
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		if seen[curr] {
+			continue
+		}
+		seen[curr] = true
+		sorted = append(sorted, curr)
+
+		for _, neighbor := range graph[curr] {
+			inDegree[neighbor]--
+			if inDegree[neighbor] == 0 {
+				queue = append(queue, neighbor)
+			}
+		}
+	}
+
+	// Add any missing elements (usually basics not involved in combinations)
+	for _, elem := range recipe {
+		if !seen[elem] {
+			sorted = append(sorted, elem)
+		}
+	}
+
+	return sorted
 }

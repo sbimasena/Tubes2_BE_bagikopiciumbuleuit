@@ -43,7 +43,7 @@ func ClearFramesFolder() {
 
 func main() {
 	// Set to true to enable step-by-step visualization, false for better performance
-	recipe.VisualEnabled = true
+	recipe.VisualEnabled = false
 
 	// Prepare visualization folder
 	ClearFramesFolder()
@@ -55,21 +55,43 @@ func main() {
 	basicElements := map[string]bool{
 		"Air": true, "Water": true, "Earth": true, "Fire": true, "Time": true,
 	}
-
-	// Shortest Path
-	fmt.Println("== Shortest Recipe ==")
-	shortest := recipe.FindShortestRecipe("Rain", elements, basicElements)
-	if shortest == nil {
-		fmt.Println("No recipe found")
+	fmt.Print("What is the target element?: ")
+	var target string
+	fmt.Scanln(&target)
+	if _, ok := elements[target]; !ok {
+		fmt.Println("Element not found in the database.")
+		return
 	}
-
+	fmt.Print("BFS or DFS? (b/d): ")
+	var choice string
+	fmt.Scanln(&choice)
+	if choice != "b" && choice != "d" {
+		fmt.Println("Invalid choice. Defaulting to BFS.")
+		choice = "b"
+	}
+	// Set the search algorithm based on user choice
+	if choice == "b" {
+		// Shortest Path
+		fmt.Println("== Shortest Recipe ==")
+		shortest := recipe.FindShortestRecipe(target, elements, basicElements, false)
+		if shortest == nil {
+			fmt.Println("No recipe found")
+		}
+	} else {
+		// Shortest Path
+		fmt.Println("== Shortest Recipe ==")
+		shortest := recipe.FindShortestRecipe(target, elements, basicElements, true)
+		if shortest == nil {
+			fmt.Println("No recipe found")
+		}
+	}
 	// Multiple Paths
-	fmt.Println("\n== Multiple Recipes (max 3) ==")
-	fmt.Println("Finding multiple recipes for Rain...")
-	multiple := recipe.FindMultipleRecipesConcurrent("Rain", elements, basicElements, 3)
-	if len(multiple) == 0 {
-		fmt.Println("No recipes found")
-	}
+	// fmt.Println("\n== Multiple Recipes (max 3) ==")
+	// fmt.Println("Finding multiple recipes for Brick...")
+	// multiple := recipe.FindMultipleRecipesConcurrent("Brick", elements, basicElements, 3)
+	// if len(multiple) == 0 {
+	// 	fmt.Println("No recipes found")
+	// }
 
 	if recipe.VisualEnabled {
 		fmt.Println("\nVisualization files saved to the 'frames' folder")
