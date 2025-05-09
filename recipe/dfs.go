@@ -2,9 +2,8 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
 	"os"
+	"time"
 )
 
 // ElementRecipe struct from your existing code
@@ -27,23 +26,19 @@ type Step struct {
 	Result      string    `json:"result"`
 }
 
-func findPathDFS(recipes []ElementRecipe, startElements []string, target string) []Path {
+func findPathDFS(recipes []ElementRecipe, startElements []string, target string) ([]Path, time.Duration, int) {
+	startTime := time.Now()
+
 	// Build lookup maps
 	elementMap := make(map[string]ElementRecipe)
 	tierMap := make(map[string]int)
 	recipeMap := make(map[string][][2]string)
-	resultMap := make(map[[2]string]string)
 
 	for _, recipe := range recipes {
 		elementMap[recipe.Element] = recipe
 		tierMap[recipe.Element] = recipe.Tier
-
 		for _, combo := range recipe.Recipes {
 			recipeMap[recipe.Element] = append(recipeMap[recipe.Element], combo)
-			key1 := [2]string{combo[0], combo[1]}
-			key2 := [2]string{combo[1], combo[0]}
-			resultMap[key1] = recipe.Element
-			resultMap[key2] = recipe.Element
 		}
 	}
 
@@ -59,23 +54,23 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 	}
 
 	memo := make(map[string]*Path)
+	visitedCounter := make(map[string]bool)
 
 	var dfs func(string, map[string]bool) *Path
 	dfs = func(current string, visited map[string]bool) *Path {
 		if basics[current] {
 			return &Path{Steps: []Step{}, FinalItem: current}
 		}
-
 		if visited[current] {
 			return nil
 		}
-
 		if p, ok := memo[current]; ok {
 			return p
 		}
 
 		visited[current] = true
 		defer delete(visited, current)
+		visitedCounter[current] = true
 
 		combos, ok := recipeMap[current]
 		if !ok {
@@ -85,15 +80,12 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 		var best *Path
 		for _, combo := range combos {
 			a, b := combo[0], combo[1]
-
 			aTier, aOk := tierMap[a]
 			bTier, bOk := tierMap[b]
 			resultTier := tierMap[current]
-
 			if !aOk || !bOk {
 				continue
 			}
-
 			maxTier := aTier
 			if bTier > maxTier {
 				maxTier = bTier
@@ -113,7 +105,6 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 
 			stepSet := make(map[[3]string]bool)
 			var steps []Step
-
 			for _, s := range pathA.Steps {
 				k := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
 				if !stepSet[k] {
@@ -128,10 +119,10 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 					steps = append(steps, s)
 				}
 			}
-
+			currentStep := Step{Ingredients: [2]string{a, b}, Result: current}
 			k := [3]string{a, b, current}
 			if !stepSet[k] {
-				steps = append(steps, Step{Ingredients: [2]string{a, b}, Result: current})
+				steps = append(steps, currentStep)
 			}
 
 			p := &Path{Steps: steps, FinalItem: current}
@@ -146,11 +137,12 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 
 	visited := make(map[string]bool)
 	path := dfs(target, visited)
+	duration := time.Since(startTime)
 
 	if path != nil {
-		return []Path{*path}
+		return []Path{*path}, duration, len(visitedCounter)
 	}
-	return nil
+	return nil, duration, len(visitedCounter)
 }
 
 // LoadRecipes loads element recipes from a JSON file
@@ -168,32 +160,4 @@ func LoadRecipes(filename string) ([]ElementRecipe, error) {
 	}
 
 	return recipes, nil
-}
-
-// FindPathToElement finds the first path to create a specific element
-func FindPathToElement(recipesFile, targetElement string, startingElements []string) *Path {
-	recipes, err := LoadRecipes(recipesFile)
-	if err != nil {
-		log.Fatalf("Error loading recipes: %v", err)
-		return nil
-	}
-
-	fmt.Printf("Loaded %d recipes\n", len(recipes))
-	fmt.Printf("Finding path to create: %s\n", targetElement)
-
-	// Cari path dengan DFS
-	paths := findPathDFS(recipes, startingElements, targetElement)
-
-	if len(paths) == 0 {
-		fmt.Printf("No path found to create '%s'\n", targetElement)
-		return nil
-	}
-
-	// Ambil path pertama (DFS mode = first-found)
-	path := paths[0]
-	fmt.Printf("Found path to create %s with %d steps:\n", targetElement, len(path.Steps))
-	for i, step := range path.Steps {
-		fmt.Printf("%d. %s + %s = %s\n", i+1, step.Ingredients[0], step.Ingredients[1], step.Result)
-	}
-	return &path
 }

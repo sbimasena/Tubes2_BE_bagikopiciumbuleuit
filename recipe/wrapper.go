@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
 
 // New function to find multiple recipes concurrently
@@ -22,7 +23,6 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 	for _, recipe := range recipes {
 		elementMap[recipe.Element] = recipe
 	}
-
 	type RecipeCombo struct {
 		ingredients [2]string
 		result      string
@@ -54,6 +54,9 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 	var mu sync.Mutex
 	sem := make(chan struct{}, 10)
 	var allPaths []Path
+	var totalVisited int
+	var maxDuration time.Duration
+	var statsMu sync.Mutex
 
 	for _, combo := range possibleCombinations {
 		mu.Lock()
@@ -77,6 +80,8 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 			}
 
 			var combinedPaths []Path
+			localVisited := 0
+
 			for _, ingredient := range combo.ingredients {
 				isBasic := false
 				for _, basic := range startingElements {
@@ -89,15 +94,20 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 					continue
 				}
 
-				ingredientPaths := findPathDFS(recipes, startingElements, ingredient)
+				ingredientPaths, duration, visited := findPathDFS(recipes, startingElements, ingredient)
 				if len(ingredientPaths) > 0 {
 					combinedPaths = append(combinedPaths, ingredientPaths[0])
+					localVisited += visited
+					statsMu.Lock()
+					if duration > maxDuration {
+						maxDuration = duration
+					}
+					statsMu.Unlock()
 				} else {
 					return
 				}
 			}
 
-			// Tier validation for final combination
 			a, b := combo.ingredients[0], combo.ingredients[1]
 			aRecipe, aOk := elementMap[a]
 			bRecipe, bOk := elementMap[b]
@@ -112,10 +122,8 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 				return
 			}
 
-			// Deduplicate steps
 			stepSet := make(map[[3]string]bool)
 			var steps []Step
-
 			for _, path := range combinedPaths {
 				for _, s := range path.Steps {
 					k := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
@@ -126,7 +134,6 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 				}
 			}
 
-			// Add the final combination step
 			finalStep := Step{Ingredients: combo.ingredients, Result: combo.result}
 			k := [3]string{combo.ingredients[0], combo.ingredients[1], combo.result}
 			if !stepSet[k] {
@@ -137,6 +144,10 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 				Steps:     steps,
 				FinalItem: targetElement,
 			}
+
+			statsMu.Lock()
+			totalVisited += localVisited
+			statsMu.Unlock()
 
 			mu.Lock()
 			if len(allPaths) < maxRecipes {
@@ -156,6 +167,9 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 		return
 	}
 
+	fmt.Printf("\n📦 Total visited nodes: %d\n", totalVisited)
+	fmt.Printf("⏱ Time taken: %v\n", maxDuration)
+
 	if len(allPaths) < maxRecipes {
 		fmt.Printf("Only found %d valid path(s) (requested %d):\n", len(allPaths), maxRecipes)
 	} else {
@@ -171,6 +185,33 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 }
 
 // Function to find a single recipe
-func FindSingleRecipe(recipesFile, targetElement string, startingElements []string) {
-	FindPathToElement(recipesFile, targetElement, startingElements)
+func FindSingleRecipe(recipesFile, targetElement string, startingElements []string) *Path {
+	recipes, err := LoadRecipes(recipesFile)
+	if err != nil {
+		log.Fatalf("Error loading recipes: %v", err)
+		return nil
+	}
+
+	fmt.Printf("Loaded %d recipes\n", len(recipes))
+	fmt.Printf("Finding path to create: %s\n", targetElement)
+
+	// Cari path + info durasi dan node
+	paths, duration, visited := findPathDFS(recipes, startingElements, targetElement)
+
+	if len(paths) == 0 {
+		fmt.Printf("No path found to create '%s'\n", targetElement)
+		return nil
+	}
+
+	path := paths[0]
+	fmt.Printf("Found path to create %s with %d steps:\n", targetElement, len(path.Steps))
+	for i, step := range path.Steps {
+		fmt.Printf("%d. %s + %s = %s\n", i+1, step.Ingredients[0], step.Ingredients[1], step.Result)
+	}
+
+	// Tambahan info
+	fmt.Printf("⏱ Time taken to search: %v\n", duration)
+	fmt.Printf("📦 Nodes visited: %d\n", visited)
+
+	return &path
 }
