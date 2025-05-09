@@ -2,86 +2,103 @@
 package main
 
 import (
-	"bufio"
+	"encoding/json"
 	"fmt"
 	"log"
-	"os"
+	"net/http"
 	"strconv"
-	"strings"
 )
 
 func main() {
-	var recipesFile string
-	var targetElement string
-	var mode string
-	var maxRecipes int
+	// --- Setup HTTP Server ---
+	mux := http.NewServeMux()
 
-	// Get recipes file path
-	fmt.Print("Enter recipes JSON file path (default: recipes.json): ")
-	recipesFile = readInputWithDefault("../recipes.json")
-
-	// Get target element
-	for {
-		fmt.Print("Enter target element to create: ")
-		targetElement = readInputWithDefault("")
-		if targetElement != "" {
-			break
+	// --- API Search Handler ---
+	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
+		target := r.URL.Query().Get("target")
+		if target == "" {
+			http.Error(w, "Target element is required", http.StatusBadRequest)
+			return
 		}
-		fmt.Println("Target element cannot be empty!")
-	}
 
-	// Get starting elements
-	startingElements := []string{
-		"Air", "Earth", "Fire", "Water", "Time",
-	}
-
-	// Get mode
-	for {
-		fmt.Print("Enter mode - 'single' for one recipe or 'multiple' for multiple recipes (default: single): ")
-		mode = readInputWithDefault("single")
-		if mode == "single" || mode == "multiple" {
-			break
+		algorithm := r.URL.Query().Get("algorithm")
+		if algorithm == "" {
+			algorithm = "dfs"
 		}
-		fmt.Println("Invalid mode! Please enter 'single' or 'multiple'")
-	}
+		if algorithm != "dfs" {
+			http.Error(w, "Only DFS is supported in this version", http.StatusBadRequest)
+			return
+		}
 
-	// If multiple mode, get max recipes count
-	if mode == "multiple" {
-		for {
-			fmt.Print("Enter maximum number of recipes to find (default: 5): ")
-			maxRecipesStr := readInputWithDefault("5")
+		maxPaths := 1
+		if maxPathsStr := r.URL.Query().Get("maxPaths"); maxPathsStr != "" {
 			var err error
-			maxRecipes, err = strconv.Atoi(maxRecipesStr)
-			if err == nil && maxRecipes > 0 {
-				break
+			maxPaths, err = strconv.Atoi(maxPathsStr)
+			if err != nil || maxPaths < 1 {
+				http.Error(w, "Invalid maxPaths value", http.StatusBadRequest)
+				return
 			}
-			fmt.Println("Please enter a valid positive number!")
 		}
-	}
 
-	// Execute based on selected mode
-	if mode == "single" {
-		fmt.Println("Finding a single recipe...")
-		FindSingleRecipe(recipesFile, targetElement, startingElements)
-	} else {
-		fmt.Printf("Finding up to %d recipes...\n", maxRecipes)
-		FindMultipleRecipesConcurrent(recipesFile, targetElement, startingElements, maxRecipes)
-	}
+		recipes, err := LoadRecipes("../recipes.json")
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to load recipes: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		startElements := []string{"Air", "Earth", "Fire", "Water"}
+
+		paths, duration, nodes := findPathDFS(recipes, startElements, target)
+
+		response := map[string]interface{}{
+			"paths":         paths,
+			"duration":      duration.String(),
+			"nodes_visited": nodes,
+			"algorithm":     algorithm,
+		}
+
+		writeJSON(w, response)
+	})
+
+	// --- Start Server ---
+	fmt.Println("🌐 Server running at http://localhost:8080")
+	log.Fatal(http.ListenAndServe(":8080", withCORS(mux)))
 }
 
 // Helper function to read input with default value
-func readInputWithDefault(defaultValue string) string {
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		log.Fatalf("Error reading input: %v", err)
-	}
+// func readInputWithDefault(defaultValue string) string {
+// 	reader := bufio.NewReader(os.Stdin)
+// 	input, err := reader.ReadString('\n')
+// 	if err != nil {
+// 		log.Fatalf("Error reading input: %v", err)
+// 	}
 
-	// Trim whitespace and newlines
-	input = strings.TrimSpace(input)
+// 	// Trim whitespace and newlines
+// 	input = strings.TrimSpace(input)
 
-	if input == "" {
-		return defaultValue
-	}
-	return input
+// 	if input == "" {
+// 		return defaultValue
+// 	}
+// 	return input
+
+// }
+
+func writeJSON(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
