@@ -1,135 +1,176 @@
-package recipe
+package main
 
 import (
+	"context"
 	"fmt"
-	"strings"
+	"log"
 	"sync"
 )
 
-// FindShortestRecipe finds the shortest recipe path to a target element
-func FindShortestRecipe(target string, elements map[string][][]string, basicElements map[string]bool) []string {
-	fmt.Println("Finding shortest recipe for", target)
-
-	// Jika target sudah elemen dasar, kembalikan langsung
-	if basicElements[target] {
-		fmt.Printf("Found recipe with 1 step\n")
-		recipe := []string{target}
-		// Tambahkan output yang diinginkan
-		fmt.Printf("%s (basic element)\n", target)
-		TraceLive(recipe, elements, basicElements)
-		return recipe
+// New function to find multiple recipes concurrently
+func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingElements []string, maxRecipes int) {
+	recipes, err := LoadRecipes(recipesFile)
+	if err != nil {
+		log.Fatalf("Error loading recipes: %v", err)
+		return
 	}
 
-	// Memoization untuk menyimpan resep terpendek yang sudah ditemukan
-	memo := make(map[string][]string)
-	visited := make(map[string]bool)
+	fmt.Printf("Loaded %d recipes\n", len(recipes))
+	fmt.Printf("Finding up to %d paths to create: %s\n", maxRecipes, targetElement)
 
-	// Juga simpan informasi tentang kombinasi yang digunakan
-	combinations := make(map[string][]string)
-
-	// Melakukan DFS
-	recipe := dfsWithMemo(target, elements, basicElements, memo, visited, combinations)
-
-	if len(recipe) == 0 {
-		fmt.Println("No recipe found")
-		return nil
-	}
-
-	fmt.Printf("Found recipe with %d steps\n", len(recipe))
-
-	// Tampilkan resep dalam format yang diinginkan
-	printFormattedRecipe(recipe, combinations)
-
-	TraceLive(recipe, elements, basicElements)
-	return recipe
-}
-
-func FindMultipleRecipesConcurrent(target string, elements map[string][][]string, basicElements map[string]bool, maxRecipes int) [][]string {
-	fmt.Printf("Finding up to %d recipes for %s\n", maxRecipes, target)
-
-	var result [][]string
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, maxRecipes)
-
-	recipes := elements[target]
-	if len(recipes) == 0 {
-		return nil
-	}
-
+	elementMap := make(map[string]ElementRecipe)
 	for _, recipe := range recipes {
-		sem <- struct{}{}
-		wg.Add(1)
+		elementMap[recipe.Element] = recipe
+	}
 
-		go func(recipe []string) {
-			defer wg.Done()
-			defer func() { <-sem }()
+	type RecipeCombo struct {
+		ingredients [2]string
+		result      string
+	}
 
-			memo := make(map[string][]string)
-			combinations := make(map[string][]string)
-			visited := make(map[string]bool)
+	targetRecipe, exists := elementMap[targetElement]
+	if !exists {
+		fmt.Printf("Target element '%s' not found in recipes\n", targetElement)
+		return
+	}
 
-			fullPath := []string{}
-			success := true
+	var possibleCombinations []RecipeCombo
+	for _, combo := range targetRecipe.Recipes {
+		possibleCombinations = append(possibleCombinations, RecipeCombo{
+			ingredients: combo,
+			result:      targetElement,
+		})
+	}
 
-			for _, ing := range recipe {
-				path := dfsWithMemo(ing, elements, basicElements, memo, visited, combinations)
-				if path == nil {
-					success = false
-					break
-				}
-				fullPath = append(fullPath, path...)
-			}
+	if len(possibleCombinations) == 0 {
+		fmt.Printf("No recipes found for element '%s'\n", targetElement)
+		return
+	}
 
-			if success {
-				fullPath = append(fullPath, target)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-				mu.Lock()
-				if len(result) < maxRecipes {
-					result = append(result, fullPath)
-					combinations[target] = recipe
-					fmt.Printf("\nRecipe %d (%d steps):\n", len(result), len(fullPath))
-					printFormattedRecipe(fullPath, combinations)
-				}
-				mu.Unlock()
-			}
-		}(recipe)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	sem := make(chan struct{}, 10)
+	var allPaths []Path
 
+	for _, combo := range possibleCombinations {
 		mu.Lock()
-		if len(result) >= maxRecipes {
+		if len(allPaths) >= maxRecipes {
 			mu.Unlock()
 			break
 		}
 		mu.Unlock()
+
+		sem <- struct{}{}
+		wg.Add(1)
+
+		go func(combo RecipeCombo) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			var combinedPaths []Path
+			for _, ingredient := range combo.ingredients {
+				isBasic := false
+				for _, basic := range startingElements {
+					if basic == ingredient {
+						isBasic = true
+						break
+					}
+				}
+				if isBasic {
+					continue
+				}
+
+				ingredientPaths := findPathDFS(recipes, startingElements, ingredient)
+				if len(ingredientPaths) > 0 {
+					combinedPaths = append(combinedPaths, ingredientPaths[0])
+				} else {
+					return
+				}
+			}
+
+			// Tier validation for final combination
+			a, b := combo.ingredients[0], combo.ingredients[1]
+			aRecipe, aOk := elementMap[a]
+			bRecipe, bOk := elementMap[b]
+			if !aOk || !bOk {
+				return
+			}
+			maxTier := aRecipe.Tier
+			if bRecipe.Tier > maxTier {
+				maxTier = bRecipe.Tier
+			}
+			if targetRecipe.Tier <= maxTier {
+				return
+			}
+
+			// Deduplicate steps
+			stepSet := make(map[[3]string]bool)
+			var steps []Step
+
+			for _, path := range combinedPaths {
+				for _, s := range path.Steps {
+					k := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
+					if !stepSet[k] {
+						stepSet[k] = true
+						steps = append(steps, s)
+					}
+				}
+			}
+
+			// Add the final combination step
+			finalStep := Step{Ingredients: combo.ingredients, Result: combo.result}
+			k := [3]string{combo.ingredients[0], combo.ingredients[1], combo.result}
+			if !stepSet[k] {
+				steps = append(steps, finalStep)
+			}
+
+			finalPath := Path{
+				Steps:     steps,
+				FinalItem: targetElement,
+			}
+
+			mu.Lock()
+			if len(allPaths) < maxRecipes {
+				allPaths = append(allPaths, finalPath)
+				if len(allPaths) >= maxRecipes {
+					cancel()
+				}
+			}
+			mu.Unlock()
+		}(combo)
 	}
 
 	wg.Wait()
-	return result
-}
 
-func printFormattedRecipe(recipe []string, combinations map[string][]string) {
-	fmt.Println("Recipe steps:")
-	used := make(map[string]bool)
-
-	for _, elem := range recipe {
-		if combo, found := combinations[elem]; found {
-			// hanya print kalau semua bahan combo-nya udah ada di used
-			ready := true
-			for _, part := range combo {
-				if !used[part] {
-					ready = false
-					break
-				}
-			}
-			if ready {
-				fmt.Printf("* %s -> %s\n", strings.Join(combo, " + "), elem)
-				used[elem] = true
-			}
-		} else {
-			fmt.Printf("* %s (basic element)\n", elem)
-			used[elem] = true
-		}
+	if len(allPaths) == 0 {
+		fmt.Println("No valid paths found")
+		return
 	}
 
-	fmt.Printf("Found recipe with %d steps: %v\n", len(recipe), recipe)
+	if len(allPaths) < maxRecipes {
+		fmt.Printf("Only found %d valid path(s) (requested %d):\n", len(allPaths), maxRecipes)
+	} else {
+		fmt.Printf("Found %d different paths to create %s:\n", len(allPaths), targetElement)
+	}
+
+	for i, path := range allPaths {
+		fmt.Printf("\nRecipe %d with %d steps:\n", i+1, len(path.Steps))
+		for j, step := range path.Steps {
+			fmt.Printf("%d. %s + %s = %s\n", j+1, step.Ingredients[0], step.Ingredients[1], step.Result)
+		}
+	}
+}
+
+// Function to find a single recipe
+func FindSingleRecipe(recipesFile, targetElement string, startingElements []string) {
+	FindPathToElement(recipesFile, targetElement, startingElements)
 }
