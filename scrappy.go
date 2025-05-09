@@ -23,6 +23,17 @@ type ElementRecipe struct {
 
 const url = "https://little-alchemy.fandom.com/wiki/Elements_(Little_Alchemy_2)"
 
+func normalizeName(s string) string {
+	// Remove anything after a newline
+	parts := strings.Split(s, "\n")
+	s = parts[0]
+
+	// Remove special characters and lowercase
+	s = strings.TrimSpace(strings.ToLower(s))
+
+	return s
+}
+
 func getDoc() (*goquery.Document, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	req, _ := http.NewRequest("GET", url, nil)
@@ -47,57 +58,229 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Extract tier information and map elements to tiers
-	elementTiers := make(map[string]int)
-	currentTier := 0
+	// STEP 1: Save entire HTML for debug purposes
+	htmlContent, _ := doc.Html()
+	os.WriteFile("debug_page.html", []byte(htmlContent), 0644)
+	fmt.Println("Saved HTML to debug_page.html for inspection")
 
-	doc.Find(".mw-headline").Each(func(i int, s *goquery.Selection) {
-		headlineText := s.Text()
-		
-		// Extract tier number from headline text
-		tierMatch := regexp.MustCompile(`Tier (\d+) elements`).FindStringSubmatch(headlineText)
-		if len(tierMatch) > 1 {
-			tierNum, err := strconv.Atoi(tierMatch[1])
-			if err == nil {
-				currentTier = tierNum
-				fmt.Printf("Found Tier %d\n", currentTier)
-			}
+	// STEP 2: Complete reset of approach - use raw DOM inspection and build tier map methodically
+	elementTiers := make(map[string]int)
+
+	// Print the structure of the document for debugging
+	fmt.Println("Starting DOM inspection...")
+
+	// Find all spans with mw-headline class that match Tier pattern
+	var tierHeadings []struct {
+		Tier int
+		Elem *goquery.Selection
+	}
+
+	// First collect all tier headings with their numbers
+	doc.Find("span.mw-headline").Each(func(i int, s *goquery.Selection) {
+		id, exists := s.Attr("id")
+		if !exists {
+			return
 		}
 
-		// All elements under this headline belong to the current tier
-		// Find the next section with elements
-		elementSection := s.Parent().NextUntil("h2")
-		
-		// Process tables in this section
-		elementSection.Find("table.article-table tr").Each(func(j int, row *goquery.Selection) {
-			if j == 0 { // Skip header row
-				return
-			}
-			
-			cells := row.Find("td")
-			if cells.Length() >= 1 {
-				// The element name could be in the first or second cell depending on table structure
-				elementName := strings.TrimSpace(cells.First().Text())
-				
-				// Some tables have the element name in the second column
-				if elementName == "" && cells.Length() > 1 {
-					elementName = strings.TrimSpace(cells.Eq(1).Text())
-				}
-				
-				if elementName != "" {
-					elementTiers[elementName] = currentTier
-				}
-			}
+		// Check if this is a tier heading
+		tierMatch := regexp.MustCompile(`Tier_(\d+)_elements`).FindStringSubmatch(id)
+		if len(tierMatch) < 2 {
+			return
+		}
+
+		tierNum, _ := strconv.Atoi(tierMatch[1])
+		tierHeadings = append(tierHeadings, struct {
+			Tier int
+			Elem *goquery.Selection
+		}{
+			Tier: tierNum,
+			Elem: s.Parent(), // Get the h2 that contains this span
 		})
-		
-		// Process any h3 headings (individual elements) in this section
-		elementSection.Find("h3").Each(func(j int, elem *goquery.Selection) {
+
+		fmt.Printf("Found tier heading %d: %s (id=%s)\n", tierNum, s.Text(), id)
+	})
+
+	// Sort tier headings by their position in the document (not by tier number)
+	// This will help us determine section boundaries
+
+	// Now iterate through all elements after each tier heading until the next tier heading
+	for i, th := range tierHeadings {
+		currentTier := th.Tier
+		currentHeading := th.Elem
+
+		fmt.Printf("\n==== PROCESSING TIER %d ====\n", currentTier)
+
+		// Find all element names until the next tier heading or end of document
+		var nextHeading *goquery.Selection
+		if i < len(tierHeadings)-1 {
+			nextHeading = tierHeadings[i+1].Elem
+		}
+
+		// Get all h3s (element names) between current heading and next heading
+		var elementsInThisTier []string
+
+		// Process this tier's section
+		currentNode := currentHeading.Next()
+		for currentNode.Length() > 0 {
+			// Stop if we've reached the next tier heading
+			if nextHeading != nil && currentNode.Is(nextHeading.Nodes[0].Data) && currentNode.HasClass(nextHeading.AttrOr("class", "")) {
+				break
+			}
+
+			// Check if this node is an h3 (element name)
+			if goquery.NodeName(currentNode) == "h3" {
+				elementName := strings.TrimSpace(currentNode.Text())
+				if elementName != "" {
+					elementsInThisTier = append(elementsInThisTier, elementName)
+					normalizedName := normalizeName(elementName)
+					elementTiers[normalizedName] = currentTier
+					fmt.Printf("  📦 [h3] %-30s → Tier %d\n", elementName, currentTier)
+				}
+			}
+
+			// Also look for tables with elements
+			if goquery.NodeName(currentNode) == "table" || currentNode.Find("table").Length() > 0 {
+				tables := currentNode
+				if goquery.NodeName(currentNode) != "table" {
+					tables = currentNode.Find("table")
+				}
+
+				tables.Each(func(j int, table *goquery.Selection) {
+					table.Find("tr").Each(func(k int, row *goquery.Selection) {
+						if k == 0 {
+							return // Skip header row
+						}
+
+						cells := row.Find("td")
+						if cells.Length() >= 1 {
+							elementName := strings.TrimSpace(cells.First().Text())
+							if elementName == "" && cells.Length() > 1 {
+								elementName = strings.TrimSpace(cells.Eq(1).Text())
+							}
+
+							if elementName != "" {
+								elementsInThisTier = append(elementsInThisTier, elementName)
+								normalizedName := normalizeName(elementName)
+								elementTiers[normalizedName] = currentTier
+								fmt.Printf("  📦 [table] %-30s → Tier %d\n", elementName, currentTier)
+							}
+						}
+					})
+				})
+			}
+
+			// Look for divs that might contain lists of elements
+			currentNode.Find("h3").Each(func(j int, elem *goquery.Selection) {
+				elementName := strings.TrimSpace(elem.Text())
+				if elementName != "" {
+					elementsInThisTier = append(elementsInThisTier, elementName)
+					normalizedName := normalizeName(elementName)
+					elementTiers[normalizedName] = currentTier
+					fmt.Printf("  📦 [div>h3] %-30s → Tier %d\n", elementName, currentTier)
+				}
+			})
+
+			// Move to next sibling
+			currentNode = currentNode.Next()
+		}
+
+		fmt.Printf("Found %d elements in Tier %d\n", len(elementsInThisTier), currentTier)
+	}
+
+	// STEP 3: Alternative approach - Use the content div directly and track transitions
+	// between tier sections
+	currentTier := 0
+	inTierSection := false
+
+	fmt.Println("\n==== DIRECT CONTENT DIV APPROACH ====")
+
+	doc.Find(".mw-parser-output").Children().Each(func(i int, node *goquery.Selection) {
+		// Check if this is a tier heading
+		if goquery.NodeName(node) == "h2" {
+			headline := node.Find(".mw-headline")
+			if headline.Length() > 0 {
+				id, exists := headline.Attr("id")
+				if exists {
+					tierMatch := regexp.MustCompile(`Tier_(\d+)_elements`).FindStringSubmatch(id)
+					if len(tierMatch) >= 2 {
+						tierNum, _ := strconv.Atoi(tierMatch[1])
+						currentTier = tierNum
+						inTierSection = true
+						fmt.Printf("\n--- Entering Tier %d Section ---\n", currentTier)
+						return
+					}
+				}
+			}
+
+			// If it's any other h2, we're no longer in a tier section
+			if inTierSection {
+				fmt.Printf("\n--- Exiting Tier Section ---\n")
+				inTierSection = false
+			}
+			return
+		}
+
+		// Process elements only if we're in a tier section
+		if !inTierSection || currentTier == 0 {
+			return
+		}
+
+		// Process h3 elements (element names)
+		if goquery.NodeName(node) == "h3" {
+			elementName := strings.TrimSpace(node.Text())
+			if elementName != "" {
+				normalizedName := normalizeName(elementName)
+				elementTiers[normalizedName] = currentTier
+				fmt.Printf("  📦 [direct h3] %-30s → Tier %d\n", elementName, currentTier)
+			}
+			return
+		}
+
+		// Process tables
+		node.Find("table").Each(func(j int, table *goquery.Selection) {
+			table.Find("tr").Each(func(k int, row *goquery.Selection) {
+				if k == 0 {
+					return // Skip header row
+				}
+
+				cells := row.Find("td")
+				if cells.Length() >= 1 {
+					elementName := strings.TrimSpace(cells.First().Text())
+					if elementName == "" && cells.Length() > 1 {
+						elementName = strings.TrimSpace(cells.Eq(1).Text())
+					}
+
+					if elementName != "" {
+						normalizedName := normalizeName(elementName)
+						elementTiers[normalizedName] = currentTier
+						fmt.Printf("  📦 [direct table] %-30s → Tier %d\n", elementName, currentTier)
+					}
+				}
+			})
+		})
+
+		// Process h3 elements inside divs
+		node.Find("h3").Each(func(j int, elem *goquery.Selection) {
 			elementName := strings.TrimSpace(elem.Text())
 			if elementName != "" {
-				elementTiers[elementName] = currentTier
+				normalizedName := normalizeName(elementName)
+				elementTiers[normalizedName] = currentTier
+				fmt.Printf("  📦 [direct div>h3] %-30s → Tier %d\n", elementName, currentTier)
 			}
 		})
 	})
+
+	// Print tier distribution statistics
+	tierCounts := make(map[int]int)
+	for _, tier := range elementTiers {
+		tierCounts[tier]++
+	}
+
+	fmt.Println("\n------ Tier Distribution ------")
+	for tier, count := range tierCounts {
+		fmt.Printf("Tier %d: %d elements\n", tier, count)
+	}
+	fmt.Println("------------------------------\n")
 
 	// Continue with your existing image extraction logic
 	elementImages := make(map[string]string)
@@ -237,7 +420,11 @@ func main() {
 
 			if len(recipes) > 0 {
 				imageURL := elementImages[headerText]
-				tier := elementTiers[headerText]
+				// Use the normalized name to look up the tier
+				tier := elementTiers[normalizeName(headerText)]
+
+				// Log for debugging
+				fmt.Printf("⚗️ Element: %-30s → Found tier: %d\n", headerText, tier)
 
 				results = append(results, ElementRecipe{
 					Element:  headerText,
@@ -306,7 +493,12 @@ func main() {
 							}
 						}
 
-						tier := elementTiers[element]
+						// Use the normalized name to look up the tier
+						tier := elementTiers[normalizeName(element)]
+
+						// Log for debugging
+						fmt.Printf("⚗️ Element (table): %-30s → Found tier: %d\n", element, tier)
+
 						results = append(results, ElementRecipe{
 							Element:  element,
 							Recipes:  recipes,
