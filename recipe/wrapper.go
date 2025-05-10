@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
 )
@@ -216,80 +215,33 @@ func FindSingleRecipe(recipesFile, targetElement string, startingElements []stri
 	return &path
 }
 
-func printFormattedRecipe(recipe []string, combinations map[string][]string) {
-	fmt.Println("Recipe steps:")
-	used := make(map[string]bool)
-
-	for _, elem := range recipe {
-		if combo, found := combinations[elem]; found {
-			// hanya print kalau semua bahan combo-nya udah ada di used
-			ready := true
-			for _, part := range combo {
-				if !used[part] {
-					ready = false
-					break
-				}
-			}
-			if ready {
-				fmt.Printf("* %s -> %s\n", strings.Join(combo, " + "), elem)
-				used[elem] = true
-			}
-		} else {
-			fmt.Printf("* %s (basic element)\n", elem)
-			used[elem] = true
-		}
+func FindSingleRecipeBFS(recipesFile, targetElement string, startingElements []string) *Path {
+	recipes, err := LoadRecipes(recipesFile)
+	if err != nil {
+		log.Fatalf("Error loading recipes: %v", err)
+		return nil
 	}
 
-	fmt.Printf("Found recipe with %d steps: %v\n", len(recipe), recipe)
-}
+	fmt.Printf("Loaded %d recipes\n", len(recipes))
+	fmt.Printf("Finding path to create: %s\n", targetElement)
 
-func topologicalSort(combinations map[string][]string, recipe []string) []string {
-	inDegree := make(map[string]int)
-	graph := make(map[string][]string)
+	// Cari path + info durasi dan node
+	paths, duration, visited := findPathBFS(recipes, startingElements, targetElement)
 
-	// Build graph and in-degree map
-	for result, ingredients := range combinations {
-		for _, ing := range ingredients {
-			graph[ing] = append(graph[ing], result)
-			inDegree[result]++
-		}
+	if len(paths) == 0 {
+		fmt.Printf("No path found to create '%s'\n", targetElement)
+		return nil
 	}
 
-	// Start with all nodes with in-degree 0
-	queue := []string{}
-	for _, elem := range recipe {
-		if inDegree[elem] == 0 {
-			queue = append(queue, elem)
-		}
+	path := paths[0]
+	fmt.Printf("Found path to create %s with %d steps:\n", targetElement, len(path.Steps))
+	for i, step := range path.Steps {
+		fmt.Printf("%d. %s + %s = %s\n", i+1, step.Ingredients[0], step.Ingredients[1], step.Result)
 	}
 
-	var sorted []string
-	seen := make(map[string]bool)
+	// Tambahan info
+	fmt.Printf("⏱ Time taken to search: %v\n", duration)
+	fmt.Printf("📦 Nodes visited: %d\n", visited)
 
-	for len(queue) > 0 {
-		curr := queue[0]
-		queue = queue[1:]
-
-		if seen[curr] {
-			continue
-		}
-		seen[curr] = true
-		sorted = append(sorted, curr)
-
-		for _, neighbor := range graph[curr] {
-			inDegree[neighbor]--
-			if inDegree[neighbor] == 0 {
-				queue = append(queue, neighbor)
-			}
-		}
-	}
-
-	// Add any missing elements (usually basics not involved in combinations)
-	for _, elem := range recipe {
-		if !seen[elem] {
-			sorted = append(sorted, elem)
-		}
-	}
-
-	return sorted
+	return &path
 }

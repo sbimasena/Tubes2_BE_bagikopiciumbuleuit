@@ -11,6 +11,22 @@
     "tier": 0
   },
   {
+    "element": "Earth",
+    "image_url": "https://static.wikia.nocookie.net/little-alchemy/images/0/03/Air_2.svg/revision/latest/scale-to-width-down/40?cb=20210827121954",
+    "recipes": [
+      []
+    ],
+    "tier": 0
+  },
+  {
+    "element": "Time",
+    "image_url": "https://static.wikia.nocookie.net/little-alchemy/images/0/03/Air_2.svg/revision/latest/scale-to-width-down/40?cb=20210827121954",
+    "recipes": [
+      []
+    ],
+    "tier": 0
+  },
+  {
     "element": "Fire",
     "image_url": "https://static.wikia.nocookie.net/little-alchemy/images/0/01/Fire_2.svg/revision/latest/scale-to-width-down/40?cb=20210827122013",
     "recipes": [

@@ -1,144 +1,190 @@
 package recipe
 
-type Node struct {
-	Element string   // current element
-	Path    []string // path from target down to this
+import (
+	"time"
+)
+
+type BFSNode struct {
+	Remaining []string           // Elements still to be resolved
+	Steps     []Step             // Steps collected so far
+	Visited   map[string]bool    // Track visited elements in this path
+	StepSet   map[[3]string]bool // Deduplicate steps by ingredients and result
 }
 
-// ReverseBFSBranch explores from target and returns the first fully basic-resolved branch
-type bfsState struct {
-	Remaining        []string            // Elements still to resolve
-	Path             []string            // Flattened recipe path so far
-	Used             map[string]bool     // For deduplication in path
-	Combinations     map[string][]string // To fill the combinations map
-	InResolutionPath map[string]bool
-}
+func findPathBFS(recipes []ElementRecipe, startElements []string, target string) ([]Path, time.Duration, int) {
+	startTime := time.Now()
+	iterations := 0
 
-func bfsWithFlattenedRecipe(target string, elements map[string][][]string, basicElements map[string]bool) ([]string, map[string][]string) {
-	// Initial state: try all recipes of target
-	queue := []bfsState{}
-	for _, recipe := range elements[target] {
-		if len(recipe) != 2 {
-			continue
-		}
-		initialUsed := make(map[string]bool)
-		initialPath := []string{}
-		inResolutionPath := make(map[string]bool)
-		inResolutionPath[target] = true // Start with target in resolution path
-		for _, ing := range recipe {
-			if !initialUsed[ing] {
-				initialPath = append(initialPath, ing)
-				initialUsed[ing] = true
+	// Build lookup maps
+	tierMap := make(map[string]int)
+	recipeMap := make(map[string][][2]string)
+
+	for _, recipe := range recipes {
+		tierMap[recipe.Element] = recipe.Tier
+		recipeMap[recipe.Element] = recipe.Recipes
+		for _, combo := range recipe.Recipes {
+			for _, ing := range combo {
+				if _, exists := tierMap[ing]; !exists {
+					tierMap[ing] = 1 // default for undefined tier
+				}
 			}
-			inResolutionPath[ing] = true
 		}
-		queue = append(queue, bfsState{
-			Remaining: recipe,
-			Path:      initialPath,
-			Used:      initialUsed,
-			Combinations: map[string][]string{
-				target: recipe,
-			},
-			InResolutionPath: inResolutionPath,
-		})
 	}
 
-	// Store the shortest recipe found
-	var bestPath []string
-	var bestCombinations map[string][]string
+	// Set tier for basic elements
+	for _, elem := range startElements {
+		if _, exists := tierMap[elem]; !exists {
+			tierMap[elem] = 1
+		}
+	}
+
+	// Identify basic elements
+	basics := make(map[string]bool)
+	for _, e := range startElements {
+		basics[e] = true
+	}
+
+	visitedCounter := make(map[string]bool)
+
+	queue := []BFSNode{
+		{
+			Remaining: []string{target},
+			Steps:     []Step{},
+			Visited:   make(map[string]bool),
+			StepSet:   make(map[[3]string]bool),
+		},
+	}
 
 	for len(queue) > 0 {
 		curr := queue[0]
 		queue = queue[1:]
 
-		fullyResolved := true
+		// First, check if all elements in `Remaining` are basic
+		allBasic := true
+		var elemToExpand string
 
-		for _, ing := range curr.Remaining {
-			if basicElements[ing] {
+		for _, elem := range curr.Remaining {
+			visitedCounter[elem] = true
+			if !basics[elem] {
+				allBasic = false
+				elemToExpand = elem
+			}
+		}
+
+		if allBasic {
+			reversedSteps := make([]Step, len(curr.Steps))
+			for i, step := range curr.Steps {
+				reversedSteps[len(curr.Steps)-1-i] = step
+			}
+			return []Path{{
+				Steps:     reversedSteps,
+				FinalItem: target,
+			}}, time.Since(startTime), iterations
+		}
+
+		// Skip cycles
+		if curr.Visited[elemToExpand] {
+			newRemaining := removeElement(curr.Remaining, elemToExpand)
+			queue = append(queue, BFSNode{
+				Remaining: newRemaining,
+				Steps:     curr.Steps,
+				Visited:   curr.Visited,
+				StepSet:   curr.StepSet,
+			})
+			continue
+		}
+
+		newVisited := copyVisitedMap(curr.Visited)
+		newVisited[elemToExpand] = true
+
+		combos, ok := recipeMap[elemToExpand]
+		if !ok {
+			continue
+		}
+
+		for _, combo := range combos {
+			iterations++
+			a, b := combo[0], combo[1]
+
+			// Check tier constraint
+			aTier, aOk := tierMap[a]
+			bTier, bOk := tierMap[b]
+			resultTier := tierMap[elemToExpand]
+			if !aOk || !bOk {
 				continue
 			}
-			fullyResolved = false
-
-			// Expand this non-basic element using its recipes
-			for _, recipe := range elements[ing] {
-				if len(recipe) != 2 {
-					continue
-				}
-
-				cyclicRecipe := false
-				for _, r := range recipe {
-					if curr.InResolutionPath[r] {
-						cyclicRecipe = true
-						break
-					}
-				}
-				if cyclicRecipe {
-					continue // Skip this recipe as it would create a cycle
-				}
-
-				// Clone current state
-				newUsed := copySet(curr.Used)
-				newPath := append([]string{}, curr.Path...)
-				newInResolutionPath := copySet(curr.InResolutionPath)
-				for _, r := range recipe {
-					newInResolutionPath[r] = true
-					if !newUsed[r] {
-						newPath = append(newPath, r)
-						newUsed[r] = true
-					}
-				}
-
-				newCombos := copyCombos(curr.Combinations)
-				newCombos[ing] = recipe
-
-				// Replace current ingredient with the ingredients of the recipe
-				nextRemaining := []string{}
-				for _, e := range curr.Remaining {
-					if e == ing {
-						nextRemaining = append(nextRemaining, recipe...)
-					} else {
-						nextRemaining = append(nextRemaining, e)
-					}
-				}
-
-				queue = append(queue, bfsState{
-					Remaining:        nextRemaining,
-					Path:             newPath,
-					Used:             newUsed,
-					Combinations:     newCombos,
-					InResolutionPath: newInResolutionPath,
-				})
+			maxTier := aTier
+			if bTier > maxTier {
+				maxTier = bTier
 			}
-			break // only expand one unresolved element per iteration
-		}
-
-		if fullyResolved {
-			finalPath := append([]string{}, curr.Path...)
-			if !curr.Used[target] {
-				finalPath = append(finalPath, target)
+			if resultTier <= maxTier {
+				continue
 			}
-			return finalPath, curr.Combinations // exit immediately
-		}
 
+			// Make a new step
+			step := Step{Ingredients: [2]string{a, b}, Result: elemToExpand}
+			stepKey := [3]string{a, b, elemToExpand}
+
+			newSteps := make([]Step, len(curr.Steps))
+			copy(newSteps, curr.Steps)
+			newStepSet := copyStepSet(curr.StepSet)
+
+			if !newStepSet[stepKey] {
+				newSteps = append(newSteps, step)
+				newStepSet[stepKey] = true
+			}
+
+			// New Remaining list: replace elemToExpand with [a, b], drop already basic ones
+			newRemaining := []string{}
+			for _, r := range curr.Remaining {
+				if r == elemToExpand {
+					if !basics[a] {
+						newRemaining = append(newRemaining, a)
+					}
+					if !basics[b] {
+						newRemaining = append(newRemaining, b)
+					}
+				} else if !basics[r] {
+					newRemaining = append(newRemaining, r)
+				}
+			}
+
+			queue = append(queue, BFSNode{
+				Remaining: newRemaining,
+				Steps:     newSteps,
+				Visited:   newVisited,
+				StepSet:   newStepSet,
+			})
+		}
 	}
 
-	return bestPath, bestCombinations
+	return nil, time.Since(startTime), iterations
 }
 
-func copySet(original map[string]bool) map[string]bool {
-	newSet := make(map[string]bool)
+// Helper function to create a deep copy of the visited map
+func copyVisitedMap(original map[string]bool) map[string]bool {
+	newMap := make(map[string]bool)
 	for k, v := range original {
-		newSet[k] = v
-	}
-	return newSet
-}
-
-func copyCombos(original map[string][]string) map[string][]string {
-	newMap := make(map[string][]string)
-	for k, v := range original {
-		cp := make([]string, len(v))
-		copy(cp, v)
-		newMap[k] = cp
+		newMap[k] = v
 	}
 	return newMap
+}
+
+// Helper function to create a deep copy of step set
+func copyStepSet(original map[[3]string]bool) map[[3]string]bool {
+	newMap := make(map[[3]string]bool)
+	for k, v := range original {
+		newMap[k] = v
+	}
+	return newMap
+}
+
+func removeElement(slice []string, element string) []string {
+	newSlice := []string{}
+	for _, e := range slice {
+		if e != element {
+			newSlice = append(newSlice, e)
+		}
+	}
+	return newSlice
 }

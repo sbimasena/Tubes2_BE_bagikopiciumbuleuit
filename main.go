@@ -42,7 +42,7 @@ func ClearFramesFolder() {
 
 func main() {
 	// Load data from elements.json
-	elements := LoadElements("elements.json")
+	elements := LoadElements("recipes.json")
 
 	// Basic elements
 	startingElements := []string{"Air", "Water", "Earth", "Fire", "Time"}
@@ -67,9 +67,18 @@ func main() {
 		var max int
 		fmt.Scanln(&max)
 		fmt.Println("== Multiple Recipes ==")
-		recipe.FindMultipleRecipesConcurrent("elements.json", target, startingElements, max)
+		recipe.FindMultipleRecipesConcurrent("recipes.json", target, startingElements, max)
 	} else {
-		fmt.Println("== Single Recipe ==")
-		recipe.FindSingleRecipe("elements.json", target, startingElements)
+		fmt.Print("BFS or DFS?: ")
+		var choice string
+		fmt.Scanln(&choice)
+		if choice == "b" {
+			fmt.Println("== BFS ==")
+			recipe.FindSingleRecipeBFS("recipes.json", target, startingElements)
+		} else {
+			fmt.Println("== Single Recipe ==")
+			recipe.FindSingleRecipe("recipes.json", target, startingElements)
+		}
+
 	}
 }
