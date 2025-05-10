@@ -51,17 +51,12 @@ func getDoc() (*goquery.Document, error) {
 	return goquery.NewDocumentFromReader(res.Body)
 }
 
-func mainScrap() {
+func main() {
 	start := time.Now()
 	doc, err := getDoc()
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// STEP 1: Save entire HTML for debug purposes
-	htmlContent, _ := doc.Html()
-	os.WriteFile("debug_page.html", []byte(htmlContent), 0644)
-	fmt.Println("Saved HTML to debug_page.html for inspection")
 
 	// STEP 2: Complete reset of approach - use raw DOM inspection and build tier map methodically
 	elementTiers := make(map[string]int)
@@ -510,6 +505,23 @@ func mainScrap() {
 			})
 		})
 	}
+	// Tambahkan elemen Earth dan Time secara manual
+	manualBasics := []ElementRecipe{
+		{
+			Element:  "Earth",
+			ImageURL: "https://static.wikia.nocookie.net/little-alchemy/images/2/21/Earth_2.svg/revision/latest?cb=20210827132928",
+			Recipes:  [][2]string{},
+			Tier:     0,
+		},
+		{
+			Element:  "Time",
+			ImageURL: "https://static.wikia.nocookie.net/little-alchemy/images/6/63/Time_2.svg/revision/latest?cb=20210827124225",
+			Recipes:  [][2]string{},
+			Tier:     0,
+		},
+	}
+
+	results = append(results, manualBasics...)
 
 	f, err := os.Create("recipes.json")
 	if err != nil {

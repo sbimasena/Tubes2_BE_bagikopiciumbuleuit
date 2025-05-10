@@ -1,103 +1,143 @@
-package recipe
+package main
 
 import (
-	"encoding/json"
+	"bufio"
 	"fmt"
-	"log"
-	"net/http"
+	"os"
 	"strconv"
+	"strings"
 )
 
 func main() {
-	// --- Setup HTTP Server ---
-	mux := http.NewServeMux()
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Pilih algoritma utama (bfs/dfs/bidirectional): ")
+	mainAlg, _ := reader.ReadString('\n')
+	mainAlg = strings.TrimSpace(strings.ToLower(mainAlg))
 
-	// --- API Search Handler ---
-	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
-		target := r.URL.Query().Get("target")
-		if target == "" {
-			http.Error(w, "Target element is required", http.StatusBadRequest)
+	var bidiAlg string
+	if mainAlg == "bidirectional" {
+		fmt.Print("Pilih metode bidirectional (bfs/dfs): ")
+		bidiAlgRaw, _ := reader.ReadString('\n')
+		bidiAlg = strings.TrimSpace(strings.ToLower(bidiAlgRaw))
+		if bidiAlg != "bfs" && bidiAlg != "dfs" {
+			fmt.Println("Metode bidirectional tidak valid, gunakan bfs atau dfs.")
 			return
 		}
+	}
 
-		algorithm := r.URL.Query().Get("algorithm")
-		if algorithm == "" {
-			algorithm = "dfs"
+	fmt.Print("Ingin mencari satu resep atau banyak? (1/multiple): ")
+	mode, _ := reader.ReadString('\n')
+	mode = strings.TrimSpace(strings.ToLower(mode))
+
+	maxPaths := 1
+	if mode == "multiple" {
+		fmt.Print("Berapa jumlah maksimum resep yang ingin dicari? ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		val, err := strconv.Atoi(input)
+		if err == nil && val > 0 {
+			maxPaths = val
 		}
-		if algorithm != "dfs" {
-			http.Error(w, "Only DFS is supported in this version", http.StatusBadRequest)
+	}
+
+	fmt.Print("Masukkan nama elemen target: ")
+	target, _ := reader.ReadString('\n')
+	target = strings.TrimSpace(target)
+
+	elements, err := LoadElements("../recipes.json")
+	if err != nil {
+		fmt.Println("Gagal membaca file recipes.json:", err)
+		return
+	}
+
+	recipeMap, tierMap, basicElements := PrepareElementMaps(elements)
+
+	var (
+		paths [][]string
+		steps []map[string][]string
+	)
+
+	switch mainAlg {
+	case "dfs":
+		if mode == "multiple" {
+			FindMultipleRecipesConcurrent("../recipes.json", target, keys(basicElements), maxPaths)
+			return
+		} else {
+			FindSingleRecipeDFS("../recipes.json", target, keys(basicElements))
 			return
 		}
-
-		maxPaths := 1
-		if maxPathsStr := r.URL.Query().Get("maxPaths"); maxPathsStr != "" {
-			var err error
-			maxPaths, err = strconv.Atoi(maxPathsStr)
-			if err != nil || maxPaths < 1 {
-				http.Error(w, "Invalid maxPaths value", http.StatusBadRequest)
-				return
+	case "bidirectional":
+		if bidiAlg == "dfs" {
+			if mode == "multiple" {
+				paths, steps, _ = FindMultipleRecipes(target, recipeMap, basicElements, "dfs", maxPaths, tierMap)
+			} else {
+				path, step, visited, dur := FindSingleRecipe(target, recipeMap, basicElements, "dfs", tierMap)
+				if path != nil {
+					paths = append(paths, path)
+					steps = append(steps, step)
+					fmt.Println("\nTotal simpul yang dieksplorasi:", visited)
+					fmt.Println("Waktu eksekusi:", dur)
+				}
+			}
+		} else {
+			if mode == "multiple" {
+				paths, steps, _ = FindMultipleRecipes(target, recipeMap, basicElements, "bfs", maxPaths, tierMap)
+			} else {
+				path, step, visited, dur := FindSingleRecipe(target, recipeMap, basicElements, "bfs", tierMap)
+				if path != nil {
+					paths = append(paths, path)
+					steps = append(steps, step)
+					fmt.Println("\nTotal simpul yang dieksplorasi:", visited)
+					fmt.Println("Waktu eksekusi:", dur)
+				}
 			}
 		}
-
-		recipes, err := LoadRecipes("../recipes.json")
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to load recipes: %v", err), http.StatusInternalServerError)
-			return
+	default: // bfs
+		if mode == "multiple" {
+			paths, steps, _ = FindMultipleRecipes(target, recipeMap, basicElements, "bfs", maxPaths, tierMap)
+		} else {
+			path, step, visited, dur := FindSingleRecipe(target, recipeMap, basicElements, "bfs", tierMap)
+			if path != nil {
+				paths = append(paths, path)
+				steps = append(steps, step)
+				fmt.Println("\nTotal simpul yang dieksplorasi:", visited)
+				fmt.Println("Waktu eksekusi:", dur)
+			}
 		}
+	}
 
-		startElements := []string{"Air", "Earth", "Fire", "Water"}
+	fmt.Println("\nHasil:")
+	fmt.Printf("Ditemukan %d jalur resep.\n", len(paths))
 
-		paths, duration, nodes := findPathDFS(recipes, startElements, target)
+	for i := range paths {
+		stepMap := steps[i]
+		fmt.Printf("\nResep ke-%d:\n", i+1)
+		counter := 1
+		printed := make(map[string]bool)
 
-		response := map[string]interface{}{
-			"paths":         paths,
-			"duration":      duration.String(),
-			"nodes_visited": nodes,
-			"algorithm":     algorithm,
+		var printSteps func(res string)
+		printSteps = func(res string) {
+			if printed[res] {
+				return
+			}
+			ing, ok := stepMap[res]
+			if !ok {
+				return
+			}
+			printSteps(ing[0])
+			printSteps(ing[1])
+			fmt.Printf("%d. %s + %s = %s\n", counter, ing[0], ing[1], res)
+			counter++
+			printed[res] = true
 		}
-
-		writeJSON(w, response)
-	})
-
-	// --- Start Server ---
-	fmt.Println("🌐 Server running at http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", withCORS(mux)))
+		printSteps(target)
+	}
 }
 
-// Helper function to read input with default value
-// func readInputWithDefault(defaultValue string) string {
-// 	reader := bufio.NewReader(os.Stdin)
-// 	input, err := reader.ReadString('\n')
-// 	if err != nil {
-// 		log.Fatalf("Error reading input: %v", err)
-// 	}
-
-// 	// Trim whitespace and newlines
-// 	input = strings.TrimSpace(input)
-
-// 	if input == "" {
-// 		return defaultValue
-// 	}
-// 	return input
-
-// }
-
-func writeJSON(w http.ResponseWriter, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
-}
-
-func withCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
+func keys(m map[string]bool) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
