@@ -94,15 +94,10 @@ func main() {
 		}
 	default: // bfs
 		if mode == "multiple" {
-			paths, steps, _ = FindMultipleRecipes(target, recipeMap, basicElements, "bfs", maxPaths, tierMap)
+			FindMultipleRecipesBFSConcurrent("../recipes.json", target, keys(basicElements), maxPaths)
 		} else {
-			path, step, visited, dur := FindSingleRecipe(target, recipeMap, basicElements, "bfs", tierMap)
-			if path != nil {
-				paths = append(paths, path)
-				steps = append(steps, step)
-				fmt.Println("\nTotal simpul yang dieksplorasi:", visited)
-				fmt.Println("Waktu eksekusi:", dur)
-			}
+			FindSingleRecipeBFS("../recipes.json", target, keys(basicElements))
+			return
 		}
 	}
 
