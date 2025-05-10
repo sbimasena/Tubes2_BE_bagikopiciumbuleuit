@@ -3,6 +3,7 @@ package main
 import (
 	"container/list"
 	"fmt"
+	"maps"
 	"time"
 )
 
@@ -11,6 +12,21 @@ type BiState struct {
 	Path           []string
 	PathSteps      map[string][]string
 	AvailableElems map[string]bool
+}
+
+// Helper function to check if an element is valid
+func isValidElement(element string, elements map[string][][]string, tiers map[string]int) bool {
+	// 1. Harus punya info tier
+	if _, hasTier := tiers[element]; !hasTier {
+		return false
+	}
+
+	// 2. Harus muncul sebagai hasil (elements map) atau bahan dalam recipe
+	if _, isResult := elements[element]; isResult {
+		return true
+	}
+
+	return false
 }
 
 // Implementasi BFS Bidirectional dengan constraint tier dan return time duration
@@ -83,7 +99,7 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 			// Coba buat elemen baru
 			for resultElem, recipes := range elements {
 				// Skip jika sudah dikunjungi
-				if _, visited := forwardVisited[resultElem]; visited {
+				if !isValidElement(resultElem, elements, tiers) {
 					continue
 				}
 
@@ -102,6 +118,9 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 
 					ing1 := recipe[0]
 					ing2 := recipe[1]
+					if !isValidElement(ing1, elements, tiers) || !isValidElement(ing2, elements, tiers) {
+						continue
+					}
 
 					// Dapatkan tier dari bahan-bahan
 					ing1Tier, hasIng1Tier := tiers[ing1]
@@ -229,6 +248,9 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 
 				// Coba setiap bahan
 				for _, ingredient := range recipe {
+					if !isValidElement(ingredient, elements, tiers) {
+						continue
+					}
 					// Skip jika sudah dikunjungi
 					if _, visited := backwardVisited[ingredient]; visited {
 						continue
@@ -529,9 +551,7 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 			if forwardSteps, found := forwardVisited[current.Element]; found {
 				// Gabungkan steps
 				allSteps := make(map[string][]string)
-				for k, v := range forwardSteps {
-					allSteps[k] = v
-				}
+				maps.Copy(allSteps, forwardSteps)
 				for k, v := range stepsCopy {
 					allSteps[k] = v
 				}
@@ -567,6 +587,9 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 			// Coba setiap bahan
 			for _, ingredient := range recipe {
 				// Skip jika sudah dikunjungi
+				if !isValidElement(ingredient, elements, tiers) {
+					continue
+				}
 				if _, visited := backwardVisited[ingredient]; visited {
 					continue
 				}
@@ -609,51 +632,54 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 // Rekonstruksi jalur secara iteratif (tanpa rekursi)
 func reconstructPathIterative(target string, steps map[string][]string, basicElements map[string]bool,
 	elements map[string][][]string, tiers map[string]int) []string {
-	// Cek resep untuk target
+	if !isValidElement(target, elements, tiers) {
+		fmt.Printf("Target is not a valid element: %s\n", target)
+		return nil
+	}
+
+	// Cek apakah target punya resep
 	if _, hasTargetRecipe := steps[target]; !hasTargetRecipe {
-		// Coba ambil dari elements
 		recipes, ok := elements[target]
 		if !ok || len(recipes) == 0 {
 			fmt.Printf("No recipe found for target: %s\n", target)
 			return nil
 		}
 
-		// Dapatkan tier target
-		targetTier, hasTier := tiers[target]
+		_, hasTier := tiers[target]
 		if !hasTier {
 			fmt.Printf("No tier info for target: %s\n", target)
 			return nil
 		}
-
-		// Pilih resep pertama yang valid
-		recipeFound := false
+		validFound := false
 		for _, recipe := range recipes {
-			if len(recipe) == 2 {
-				// Cek constraint tier
-				ing1Tier, hasIng1Tier := tiers[recipe[0]]
-				ing2Tier, hasIng2Tier := tiers[recipe[1]]
-
-				if !hasIng1Tier || !hasIng2Tier {
-					continue
-				}
-
-				if ing1Tier >= targetTier || ing2Tier >= targetTier {
-					continue
-				}
-
-				steps[target] = recipe
-				recipeFound = true
-				break
+			if len(recipe) != 2 {
+				continue
 			}
+			ing1, ing2 := recipe[0], recipe[1]
+			t1, ok1 := tiers[ing1]
+			t2, ok2 := tiers[ing2]
+			targetTier, okTarget := tiers[target]
+			if !isValidElement(ing1, elements, tiers) || !isValidElement(ing2, elements, tiers) {
+				continue
+			}
+			if !ok1 || !ok2 || !okTarget {
+				continue
+			}
+			if t1 >= targetTier || t2 >= targetTier {
+				continue
+			}
+
+			steps[target] = recipe
+			validFound = true
+			break
 		}
 
-		if !recipeFound {
-			fmt.Printf("No valid recipe found for target: %s\n", target)
+		if !validFound {
 			return nil
 		}
+
 	}
 
-	// Stack untuk konstruksi jalur
 	type StackItem struct {
 		Element string
 		Visited bool
@@ -662,92 +688,74 @@ func reconstructPathIterative(target string, steps map[string][]string, basicEle
 	stack := list.New()
 	stack.PushBack(StackItem{Element: target, Visited: false})
 
-	// Set untuk melacak elemen yang sudah tersedia
 	available := make(map[string]bool)
 	for e := range basicElements {
 		available[e] = true
 	}
-
-	// Set untuk melacak elemen yang dikunjungi
 	visited := make(map[string]bool)
-
-	// Jalur final
 	var finalPath []string
 
-	// Loop konstruksi jalur
 	for stack.Len() > 0 {
-		// Pop dari stack
 		item := stack.Back().Value.(StackItem)
 		stack.Remove(stack.Back())
 
-		// Jika elemen sudah tersedia, skip
 		if available[item.Element] {
 			continue
 		}
+		if !isValidElement(item.Element, elements, tiers) {
+			continue
+		}
 
-		// Jika elemen ini belum dikunjungi, tambahkan bahannya ke stack
 		if !item.Visited {
-			// Tandai untuk dikunjungi lagi
 			stack.PushBack(StackItem{Element: item.Element, Visited: true})
 
-			// Cek apakah ada resep
 			recipe, hasRecipe := steps[item.Element]
 			if !hasRecipe {
-				// Cari resep dari elements dengan constraint tier
 				recipes, ok := elements[item.Element]
 				if !ok || len(recipes) == 0 {
 					fmt.Printf("No recipe found for: %s\n", item.Element)
 					continue
 				}
-
-				// Dapatkan tier
 				elemTier, hasTier := tiers[item.Element]
 				if !hasTier {
 					fmt.Printf("No tier info for: %s\n", item.Element)
 					continue
 				}
-
-				// Pilih resep pertama yang valid dengan constraint tier
 				for _, r := range recipes {
-					if len(r) == 2 {
-						// Cek constraint tier
-						ing1Tier, hasIng1Tier := tiers[r[0]]
-						ing2Tier, hasIng2Tier := tiers[r[1]]
-
-						if !hasIng1Tier || !hasIng2Tier {
-							continue
-						}
-
-						if ing1Tier >= elemTier || ing2Tier >= elemTier {
-							continue
-						}
-
-						recipe = r
-						steps[item.Element] = r
-						hasRecipe = true
-						break
+					if len(r) != 2 {
+						continue
 					}
-				}
-			}
-
-			// Tambahkan bahan ke stack
-			for _, ingredient := range recipe {
-				if !available[ingredient] && !visited[ingredient] {
-					stack.PushBack(StackItem{Element: ingredient, Visited: false})
-				}
-			}
-		} else {
-			// Elemen sudah dikunjungi, periksa apakah semua bahannya tersedia
-			// Cek apakah semua bahan tersedia
-			allAvailable := true
-			for _, ingredient := range steps[item.Element] {
-				if !available[ingredient] {
-					allAvailable = false
+					ing1, ing2 := r[0], r[1]
+					t1, ok1 := tiers[ing1]
+					t2, ok2 := tiers[ing2]
+					if !ok1 || !ok2 {
+						continue
+					}
+					if t1 >= elemTier || t2 >= elemTier {
+						continue
+					}
+					recipe = r
+					steps[item.Element] = r
 					break
 				}
 			}
 
-			// Jika semua bahan tersedia, tambahkan elemen ini ke jalur
+			for _, ingredient := range recipe {
+				if !available[ingredient] && !visited[ingredient] {
+					stack.PushBack(StackItem{Element: ingredient, Visited: false})
+				}
+				if !isValidElement(ingredient, elements, tiers) {
+					return nil
+				}
+			}
+		} else {
+			allAvailable := true
+			for _, ing := range steps[item.Element] {
+				if !available[ing] {
+					allAvailable = false
+					break
+				}
+			}
 			if allAvailable {
 				finalPath = append(finalPath, item.Element)
 				available[item.Element] = true
@@ -759,7 +767,6 @@ func reconstructPathIterative(target string, steps map[string][]string, basicEle
 		}
 	}
 
-	// Filter elemen dasar dari jalur
 	return filterBasicElements(finalPath, basicElements)
 }
 

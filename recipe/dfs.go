@@ -37,9 +37,7 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 	for _, recipe := range recipes {
 		elementMap[recipe.Element] = recipe
 		tierMap[recipe.Element] = recipe.Tier
-		for _, combo := range recipe.Recipes {
-			recipeMap[recipe.Element] = append(recipeMap[recipe.Element], combo)
-		}
+		recipeMap[recipe.Element] = append(recipeMap[recipe.Element], recipe.Recipes...)
 	}
 
 	for _, elem := range startElements {
@@ -68,7 +66,6 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 			return nil
 		}
 
-		// Cek memo: jika kita tahu elemen ini tidak bisa dibuat, langsung return nil
 		if success, ok := memo[current]; ok && !success {
 			return nil
 		}
@@ -79,11 +76,10 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 
 		combos, ok := recipeMap[current]
 		if !ok {
-			memo[current] = false // Catat bahwa elemen ini tidak bisa dibuat
+			memo[current] = false
 			return nil
 		}
 
-		// Ubah dari mencari "best" (jalur terpendek) menjadi mengambil jalur pertama yang valid
 		for _, combo := range combos {
 			a, b := combo[0], combo[1]
 			aTier, aOk := tierMap[a]
@@ -94,12 +90,7 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 				continue
 			}
 
-			maxTier := aTier
-			if bTier > maxTier {
-				maxTier = bTier
-			}
-
-			if resultTier <= maxTier {
+			if resultTier <= max(aTier, bTier) {
 				continue
 			}
 
@@ -113,7 +104,7 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 				continue
 			}
 
-			// Gabungkan langkah-langkah dari kedua jalur, menghilangkan duplikat
+			// Gabungkan steps tanpa duplikat
 			stepSet := make(map[[3]string]bool)
 			var steps []Step
 
@@ -133,22 +124,17 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 				}
 			}
 
-			// Tambahkan langkah untuk membuat elemen saat ini
-			currentStep := Step{Ingredients: [2]string{a, b}, Result: current}
+			// Tambahkan langkah terakhir
 			k := [3]string{a, b, current}
 			if !stepSet[k] {
-				steps = append(steps, currentStep)
+				steps = append(steps, Step{Ingredients: [2]string{a, b}, Result: current})
 			}
 
-			// Buat jalur lengkap
-			p := &Path{Steps: steps, FinalItem: current}
-
-			// Ubah dari memilih jalur terpendek menjadi mengambil jalur pertama yang valid
-			memo[current] = true // Catat bahwa elemen ini bisa dibuat
-			return p             // Return jalur pertama yang valid
+			memo[current] = true
+			return &Path{Steps: steps, FinalItem: current}
 		}
 
-		// Jika tidak ada jalur yang valid, catat dalam memo
+		// kalau semua kombinasi gagal
 		memo[current] = false
 		return nil
 	}

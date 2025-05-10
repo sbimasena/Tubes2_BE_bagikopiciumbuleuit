@@ -513,12 +513,6 @@ func main() {
 			Recipes:  [][2]string{},
 			Tier:     0,
 		},
-		{
-			Element:  "Time",
-			ImageURL: "https://static.wikia.nocookie.net/little-alchemy/images/6/63/Time_2.svg/revision/latest?cb=20210827124225",
-			Recipes:  [][2]string{},
-			Tier:     0,
-		},
 	}
 
 	results = append(results, manualBasics...)
