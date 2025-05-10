@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -42,74 +41,35 @@ func ClearFramesFolder() {
 }
 
 func main() {
-	// Set to true to enable step-by-step visualization, false for better performance
-	recipe.VisualEnabled = false
-
-	// Prepare visualization folder
-	ClearFramesFolder()
-
 	// Load data from elements.json
 	elements := LoadElements("elements.json")
 
 	// Basic elements
-	basicElements := map[string]bool{
-		"Air": true, "Water": true, "Earth": true, "Fire": true, "Time": true,
-	}
+	startingElements := []string{"Air", "Water", "Earth", "Fire", "Time"}
+
+	// Tanya elemen tujuan
 	fmt.Print("What is the target element?: ")
 	var target string
 	fmt.Scanln(&target)
+
 	if _, ok := elements[target]; !ok {
 		fmt.Println("Element not found in the database.")
 		return
 	}
-	fmt.Print("BFS or DFS? (b/d): ")
-	var choice string
-	fmt.Scanln(&choice)
-	if choice != "b" && choice != "d" {
-		fmt.Println("Invalid choice. Defaulting to BFS.")
-		choice = "b"
-	}
-	// Set the search algorithm based on user choice
-	if choice == "b" {
-		// Shortest Path
-		fmt.Println("== Shortest Recipe ==")
-		shortest := recipe.FindShortestRecipe(target, elements, basicElements, false)
-		if shortest == nil {
-			fmt.Println("No recipe found")
-		}
+
+	// Pilih jenis pencarian
+	fmt.Print("Single (s) or Multiple (m) recipes?: ")
+	var mode string
+	fmt.Scanln(&mode)
+
+	if mode == "m" {
+		fmt.Print("Maximum number of recipes to find?: ")
+		var max int
+		fmt.Scanln(&max)
+		fmt.Println("== Multiple Recipes ==")
+		recipe.FindMultipleRecipesConcurrent("elements.json", target, startingElements, max)
 	} else {
-		// Shortest Path
-		fmt.Println("== Shortest Recipe ==")
-		shortest := recipe.FindShortestRecipe(target, elements, basicElements, true)
-		if shortest == nil {
-			fmt.Println("No recipe found")
-		}
-	}
-	// Multiple Paths
-	// fmt.Println("\n== Multiple Recipes (max 3) ==")
-	// fmt.Println("Finding multiple recipes for Brick...")
-	// multiple := recipe.FindMultipleRecipesConcurrent("Brick", elements, basicElements, 3)
-	// if len(multiple) == 0 {
-	// 	fmt.Println("No recipes found")
-	// }
-
-	if recipe.VisualEnabled {
-		fmt.Println("\nVisualization files saved to the 'frames' folder")
-
-		// Convert DOT files to PNG using Graphviz
-		fmt.Println("Converting DOT files to PNG...")
-		files, err := filepath.Glob("frames/*.dot")
-		if err == nil {
-			for _, file := range files {
-				outPng := file[:len(file)-4] + ".png"
-				cmd := exec.Command("dot", "-Tpng", file, "-o", outPng)
-				err := cmd.Run()
-				if err != nil {
-					fmt.Printf("Error converting %s: %v\n", file, err)
-				}
-			}
-		}
-
-		fmt.Println("Done! You can view the step-by-step visualizations as PNG files")
+		fmt.Println("== Single Recipe ==")
+		recipe.FindSingleRecipe("elements.json", target, startingElements)
 	}
 }

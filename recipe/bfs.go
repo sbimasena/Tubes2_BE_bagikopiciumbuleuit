@@ -7,10 +7,11 @@ type Node struct {
 
 // ReverseBFSBranch explores from target and returns the first fully basic-resolved branch
 type bfsState struct {
-	Remaining    []string            // Elements still to resolve
-	Path         []string            // Flattened recipe path so far
-	Used         map[string]bool     // For deduplication in path
-	Combinations map[string][]string // To fill the combinations map
+	Remaining        []string            // Elements still to resolve
+	Path             []string            // Flattened recipe path so far
+	Used             map[string]bool     // For deduplication in path
+	Combinations     map[string][]string // To fill the combinations map
+	InResolutionPath map[string]bool
 }
 
 func bfsWithFlattenedRecipe(target string, elements map[string][][]string, basicElements map[string]bool) ([]string, map[string][]string) {
@@ -22,11 +23,14 @@ func bfsWithFlattenedRecipe(target string, elements map[string][][]string, basic
 		}
 		initialUsed := make(map[string]bool)
 		initialPath := []string{}
+		inResolutionPath := make(map[string]bool)
+		inResolutionPath[target] = true // Start with target in resolution path
 		for _, ing := range recipe {
 			if !initialUsed[ing] {
 				initialPath = append(initialPath, ing)
 				initialUsed[ing] = true
 			}
+			inResolutionPath[ing] = true
 		}
 		queue = append(queue, bfsState{
 			Remaining: recipe,
@@ -35,6 +39,7 @@ func bfsWithFlattenedRecipe(target string, elements map[string][][]string, basic
 			Combinations: map[string][]string{
 				target: recipe,
 			},
+			InResolutionPath: inResolutionPath,
 		})
 	}
 
@@ -60,10 +65,23 @@ func bfsWithFlattenedRecipe(target string, elements map[string][][]string, basic
 					continue
 				}
 
+				cyclicRecipe := false
+				for _, r := range recipe {
+					if curr.InResolutionPath[r] {
+						cyclicRecipe = true
+						break
+					}
+				}
+				if cyclicRecipe {
+					continue // Skip this recipe as it would create a cycle
+				}
+
 				// Clone current state
 				newUsed := copySet(curr.Used)
 				newPath := append([]string{}, curr.Path...)
+				newInResolutionPath := copySet(curr.InResolutionPath)
 				for _, r := range recipe {
+					newInResolutionPath[r] = true
 					if !newUsed[r] {
 						newPath = append(newPath, r)
 						newUsed[r] = true
@@ -84,10 +102,11 @@ func bfsWithFlattenedRecipe(target string, elements map[string][][]string, basic
 				}
 
 				queue = append(queue, bfsState{
-					Remaining:    nextRemaining,
-					Path:         newPath,
-					Used:         newUsed,
-					Combinations: newCombos,
+					Remaining:        nextRemaining,
+					Path:             newPath,
+					Used:             newUsed,
+					Combinations:     newCombos,
+					InResolutionPath: newInResolutionPath,
 				})
 			}
 			break // only expand one unresolved element per iteration
