@@ -53,7 +53,9 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 		basics[e] = true
 	}
 
-	memo := make(map[string]*Path)
+	// Modifikasi: memo hanya menyimpan apakah elemen sudah pernah berhasil dibuat atau tidak
+	// Tidak menyimpan jalur terbaik untuk elemen tersebut
+	memo := make(map[string]bool)
 	visitedCounter := make(map[string]bool)
 
 	var dfs func(string, map[string]bool) *Path
@@ -61,11 +63,14 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 		if basics[current] {
 			return &Path{Steps: []Step{}, FinalItem: current}
 		}
+
 		if visited[current] {
 			return nil
 		}
-		if p, ok := memo[current]; ok {
-			return p
+
+		// Cek memo: jika kita tahu elemen ini tidak bisa dibuat, langsung return nil
+		if success, ok := memo[current]; ok && !success {
+			return nil
 		}
 
 		visited[current] = true
@@ -74,22 +79,26 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 
 		combos, ok := recipeMap[current]
 		if !ok {
+			memo[current] = false // Catat bahwa elemen ini tidak bisa dibuat
 			return nil
 		}
 
-		var best *Path
+		// Ubah dari mencari "best" (jalur terpendek) menjadi mengambil jalur pertama yang valid
 		for _, combo := range combos {
 			a, b := combo[0], combo[1]
 			aTier, aOk := tierMap[a]
 			bTier, bOk := tierMap[b]
 			resultTier := tierMap[current]
+
 			if !aOk || !bOk {
 				continue
 			}
+
 			maxTier := aTier
 			if bTier > maxTier {
 				maxTier = bTier
 			}
+
 			if resultTier <= maxTier {
 				continue
 			}
@@ -98,13 +107,16 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 			if pathA == nil {
 				continue
 			}
+
 			pathB := dfs(b, visited)
 			if pathB == nil {
 				continue
 			}
 
+			// Gabungkan langkah-langkah dari kedua jalur, menghilangkan duplikat
 			stepSet := make(map[[3]string]bool)
 			var steps []Step
+
 			for _, s := range pathA.Steps {
 				k := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
 				if !stepSet[k] {
@@ -112,6 +124,7 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 					steps = append(steps, s)
 				}
 			}
+
 			for _, s := range pathB.Steps {
 				k := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
 				if !stepSet[k] {
@@ -119,20 +132,25 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 					steps = append(steps, s)
 				}
 			}
+
+			// Tambahkan langkah untuk membuat elemen saat ini
 			currentStep := Step{Ingredients: [2]string{a, b}, Result: current}
 			k := [3]string{a, b, current}
 			if !stepSet[k] {
 				steps = append(steps, currentStep)
 			}
 
+			// Buat jalur lengkap
 			p := &Path{Steps: steps, FinalItem: current}
-			if best == nil || len(p.Steps) < len(best.Steps) {
-				best = p
-			}
+
+			// Ubah dari memilih jalur terpendek menjadi mengambil jalur pertama yang valid
+			memo[current] = true // Catat bahwa elemen ini bisa dibuat
+			return p             // Return jalur pertama yang valid
 		}
 
-		memo[current] = best
-		return best
+		// Jika tidak ada jalur yang valid, catat dalam memo
+		memo[current] = false
+		return nil
 	}
 
 	visited := make(map[string]bool)
@@ -142,6 +160,7 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 	if path != nil {
 		return []Path{*path}, duration, len(visitedCounter)
 	}
+
 	return nil, duration, len(visitedCounter)
 }
 

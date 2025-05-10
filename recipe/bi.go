@@ -152,7 +152,6 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 						forwardQueue.PushBack(newState)
 						forwardVisited[resultElem] = newState
 
-
 						// Cek apakah ini target
 						if resultElem == target {
 
@@ -276,7 +275,6 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 					// Tambahkan ke queue dan visited
 					backwardQueue.PushBack(newState)
 					backwardVisited[ingredient] = newState
-				
 
 					// Cek apakah ini elemen dasar
 					if basicElements[ingredient] {
@@ -710,7 +708,6 @@ func reconstructPathIterative(target string, steps map[string][]string, basicEle
 				}
 
 				// Pilih resep pertama yang valid dengan constraint tier
-				recipeFound := false
 				for _, r := range recipes {
 					if len(r) == 2 {
 						// Cek constraint tier
@@ -728,14 +725,8 @@ func reconstructPathIterative(target string, steps map[string][]string, basicEle
 						recipe = r
 						steps[item.Element] = r
 						hasRecipe = true
-						recipeFound = true
 						break
 					}
-				}
-
-				if !recipeFound {
-					fmt.Printf("No valid recipe found for: %s\n", item.Element)
-					continue
 				}
 			}
 
@@ -747,15 +738,9 @@ func reconstructPathIterative(target string, steps map[string][]string, basicEle
 			}
 		} else {
 			// Elemen sudah dikunjungi, periksa apakah semua bahannya tersedia
-			recipe, hasRecipe := steps[item.Element]
-			if !hasRecipe {
-				fmt.Printf("Missing recipe for: %s\n", item.Element)
-				return nil
-			}
-
 			// Cek apakah semua bahan tersedia
 			allAvailable := true
-			for _, ingredient := range recipe {
+			for _, ingredient := range steps[item.Element] {
 				if !available[ingredient] {
 					allAvailable = false
 					break
