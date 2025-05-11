@@ -28,7 +28,7 @@ type SearchResult struct {
 	Algorithm    string                `json:"algorithm"`
 }
 
-func FindSingleRecipe(
+func FindSingleRecipeBi(
 	target string,
 	elements map[string][][]string,
 	basicElements map[string]bool,
@@ -47,7 +47,7 @@ func FindSingleRecipe(
 	}
 }
 
-func FindMultipleRecipes(target string, elements map[string][][]string, basicElements map[string]bool, algorithm string, maxPaths int, tierMap map[string]int) ([][]string, []map[string][]string, int) {
+func FindMultipleRecipesBi(target string, elements map[string][][]string, basicElements map[string]bool, algorithm string, maxPaths int, tierMap map[string]int) ([][]string, []map[string][]string, int) {
 	switch algorithm {
 	case "bfs":
 		return BiSearchMultipleBFS(target, elements, basicElements, maxPaths, tierMap)
@@ -401,11 +401,11 @@ func copyElements(elements map[string][][]string) map[string][][]string {
 }
 
 // Function to find a single recipe
-func FindSingleRecipeDFS(recipesFile, targetElement string, startingElements []string) *Path {
+func FindSingleRecipeDFS(recipesFile, targetElement string, startingElements []string) (*Path, int, time.Duration) {
 	recipes, err := LoadRecipes(recipesFile)
 	if err != nil {
 		log.Fatalf("Error loading recipes: %v", err)
-		return nil
+		return nil, 0, 0
 	}
 
 	fmt.Printf("Loaded %d recipes\n", len(recipes))
@@ -416,7 +416,7 @@ func FindSingleRecipeDFS(recipesFile, targetElement string, startingElements []s
 
 	if len(paths) == 0 {
 		fmt.Printf("No path found to create '%s'\n", targetElement)
-		return nil
+		return nil, 0, 0
 	}
 
 	path := paths[0]
@@ -429,20 +429,17 @@ func FindSingleRecipeDFS(recipesFile, targetElement string, startingElements []s
 	fmt.Printf("⏱ Time taken to search: %v\n", duration)
 	fmt.Printf("📦 Nodes visited: %d\n", visited)
 
-	return &path
+	return &path, visited, duration
 }
 
-func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingElements []string, maxRecipes int) {
+func FindMultipleRecipesDFSConcurrent(recipesFile, targetElement string, startingElements []string, maxRecipes int) []Path {
 	recipes, err := LoadRecipes(recipesFile)
 	if err != nil {
-		log.Fatalf("Error loading recipes: %v", err)
-		return
+		log.Printf("Error loading recipes: %v", err)
+		return nil
 	}
 
-	fmt.Printf("Loaded %d recipes\n", len(recipes))
-	fmt.Printf("Finding up to %d paths to create: %s\n", maxRecipes, targetElement)
-
-	// Build recipe maps for analysis
+	// Build recipe maps
 	elementMap := make(map[string]ElementRecipe)
 	tierMap := make(map[string]int)
 	for _, recipe := range recipes {
@@ -450,83 +447,39 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 		tierMap[recipe.Element] = recipe.Tier
 	}
 
-	// Get the target recipe
 	targetRecipe, exists := elementMap[targetElement]
 	if !exists {
-		fmt.Printf("Target element '%s' not found in recipes\n", targetElement)
-		return
+		log.Printf("Target element '%s' not found in recipes", targetElement)
+		return nil
 	}
 	targetTier := targetRecipe.Tier
 
-	// Find valid combinations that can create the target
-	// Check tier constraints upfront
+	// Cari kombinasi valid
 	var validCombinations [][2]string
 	for _, combo := range targetRecipe.Recipes {
 		a, b := combo[0], combo[1]
 		aTier := getTier(a, tierMap)
 		bTier := getTier(b, tierMap)
-
-		// Strict check: Both ingredients must have tier less than target
 		if aTier < targetTier && bTier < targetTier {
 			validCombinations = append(validCombinations, combo)
 		}
 	}
 
 	if len(validCombinations) == 0 {
-		fmt.Printf("No valid recipes found for element '%s'\n", targetElement)
-		return
+		log.Printf("No valid recipes found for element '%s'", targetElement)
+		return nil
 	}
 
-	// Find all alternative paths to the ingredients of the target
-	var alternativeIngredientPaths = make(map[string][][2]string)
-
-	// For each valid combination to make target
-	for _, combo := range validCombinations {
-		ingredient1, ingredient2 := combo[0], combo[1]
-
-		// For each non-basic ingredient, find its recipes
-		for _, ingredient := range []string{ingredient1, ingredient2} {
-			// Skip if it's a basic element or we already found alternatives
-			if isBasicElement(ingredient, startingElements) || len(alternativeIngredientPaths[ingredient]) > 0 {
-				continue
-			}
-
-			// Find the recipes for this ingredient
-			if ingRecipe, exists := elementMap[ingredient]; exists {
-				// Add only valid recipes (tier check)
-				var validRecipes [][2]string
-				ingTier := ingRecipe.Tier
-
-				for _, ingCombo := range ingRecipe.Recipes {
-					a, b := ingCombo[0], ingCombo[1]
-					aTier := getTier(a, tierMap)
-					bTier := getTier(b, tierMap)
-
-					// Strict check: Both ingredients must have tier less than this ingredient
-					if aTier < ingTier && bTier < ingTier {
-						validRecipes = append(validRecipes, ingCombo)
-					}
-				}
-
-				alternativeIngredientPaths[ingredient] = validRecipes
-			}
-		}
-	}
-
-	// Synchronization primitives
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	sem := make(chan struct{}, 10)
 
-	// Results
 	var allPaths []Path
-	var pathSignatures = make(map[string]bool)
-	var totalVisited int
-	var maxDuration time.Duration
+	pathSignatures := make(map[string]bool)
 
-	// First approach: Use the standard direct approach for first set of paths
 	for _, combo := range validCombinations {
 		mu.Lock()
 		if len(allPaths) >= maxRecipes {
@@ -542,298 +495,63 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 			defer wg.Done()
 			defer func() { <-sem }()
 
+			// Tambahkan pengecekan context
 			select {
 			case <-ctx.Done():
 				return
 			default:
 			}
 
-			var combinedPaths []Path
-			localVisited := 0
+			var combinedSteps []Step
+			visitedSet := make(map[[3]string]bool)
 
-			// For each ingredient
 			for _, ingredient := range combo {
 				if isBasicElement(ingredient, startingElements) {
 					continue
 				}
-
-				// Find path to this ingredient
-				ingredientPaths, duration, visited := findPathDFS(recipes, startingElements, ingredient)
-
-				if len(ingredientPaths) > 0 {
-					// Verify the path follows tier constraints
-					if isValidPath(ingredientPaths[0], tierMap) {
-						combinedPaths = append(combinedPaths, ingredientPaths[0])
-						localVisited += visited
-
-						mu.Lock()
-						if duration > maxDuration {
-							maxDuration = duration
-						}
-						mu.Unlock()
-					} else {
-						return
-					}
-				} else {
+				paths, _, _ := findPathDFS(recipes, startingElements, ingredient)
+				if len(paths) == 0 {
 					return
 				}
-			}
-
-			// Combine steps without duplicates
-			stepSet := make(map[[3]string]bool)
-			var steps []Step
-
-			for _, path := range combinedPaths {
-				for _, s := range path.Steps {
+				for _, s := range paths[0].Steps {
 					key := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
-					if !stepSet[key] {
-						stepSet[key] = true
-						steps = append(steps, s)
+					if !visitedSet[key] {
+						visitedSet[key] = true
+						combinedSteps = append(combinedSteps, s)
 					}
 				}
 			}
 
-			// Add final step
+			// Tambahkan step akhir
 			finalStep := Step{Ingredients: combo, Result: targetElement}
 			key := [3]string{combo[0], combo[1], targetElement}
-			if !stepSet[key] {
-				stepSet[key] = true
-				steps = append(steps, finalStep)
+			if !visitedSet[key] {
+				combinedSteps = append(combinedSteps, finalStep)
 			}
 
-			finalPath := Path{
-				Steps:     steps,
-				FinalItem: targetElement,
-			}
+			path := Path{Steps: combinedSteps, FinalItem: targetElement}
+			signature := generateSimpleSignature(path)
 
-			// Final check: ensure the whole path is valid
-			if isValidPath(finalPath, tierMap) {
-				signature := generateSimpleSignature(finalPath)
-
-				mu.Lock()
-				totalVisited += localVisited
-
-				if !pathSignatures[signature] && len(allPaths) < maxRecipes {
-					pathSignatures[signature] = true
-					allPaths = append(allPaths, finalPath)
-
-					if len(allPaths) >= maxRecipes {
-						cancel()
-					}
+			mu.Lock()
+			defer mu.Unlock()
+			if !pathSignatures[signature] && len(allPaths) < maxRecipes {
+				pathSignatures[signature] = true
+				allPaths = append(allPaths, path)
+				if len(allPaths) >= maxRecipes {
+					cancel()
 				}
-				mu.Unlock()
 			}
 		}(combo)
 	}
 
-	// Second approach: Use alternative paths for ingredients
-	for _, combo := range validCombinations {
-		mu.Lock()
-		if len(allPaths) >= maxRecipes {
-			mu.Unlock()
-			break
-		}
-		mu.Unlock()
-
-		// For each ingredient in the combo
-		for ingIndex, ingredient := range combo {
-			// Skip basic elements
-			if isBasicElement(ingredient, startingElements) {
-				continue
-			}
-
-			// Get alternative ways to create this ingredient
-			alternatives := alternativeIngredientPaths[ingredient]
-			if len(alternatives) == 0 {
-				continue
-			}
-
-			// Try each alternative recipe for this ingredient
-			for _, altCombo := range alternatives {
-				mu.Lock()
-				if len(allPaths) >= maxRecipes {
-					mu.Unlock()
-					break
-				}
-				mu.Unlock()
-
-				sem <- struct{}{}
-				wg.Add(1)
-
-				go func(targetCombo [2]string, ingIndex int, ingredient string, altCombo [2]string) {
-					defer wg.Done()
-					defer func() { <-sem }()
-
-					select {
-					case <-ctx.Done():
-						return
-					default:
-					}
-
-					// Step 1: Find paths for both ingredients of the alternative combo
-					var altIngredientPaths []Path
-					localVisited := 0
-
-					for _, altIng := range altCombo {
-						if isBasicElement(altIng, startingElements) {
-							continue
-						}
-
-						paths, duration, visited := findPathDFS(recipes, startingElements, altIng)
-
-						if len(paths) > 0 {
-							// Verify path follows tier constraints
-							if isValidPath(paths[0], tierMap) {
-								altIngredientPaths = append(altIngredientPaths, paths[0])
-								localVisited += visited
-
-								mu.Lock()
-								if duration > maxDuration {
-									maxDuration = duration
-								}
-								mu.Unlock()
-							} else {
-								return
-							}
-						} else {
-							return
-						}
-					}
-
-					// Step 2: Find path for the other ingredient in the target combo
-					var otherIngredientPath []Path
-					otherIngredient := targetCombo[1-ingIndex]
-
-					if !isBasicElement(otherIngredient, startingElements) {
-						paths, duration, visited := findPathDFS(recipes, startingElements, otherIngredient)
-
-						if len(paths) > 0 {
-							// Verify path follows tier constraints
-							if isValidPath(paths[0], tierMap) {
-								otherIngredientPath = append(otherIngredientPath, paths[0])
-								localVisited += visited
-
-								mu.Lock()
-								if duration > maxDuration {
-									maxDuration = duration
-								}
-								mu.Unlock()
-							} else {
-								return
-							}
-						} else {
-							return
-						}
-					}
-
-					// Step 3: Combine all steps
-					stepSet := make(map[[3]string]bool)
-					var steps []Step
-
-					// Add steps for alternative ingredients
-					for _, path := range altIngredientPaths {
-						for _, s := range path.Steps {
-							key := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
-							if !stepSet[key] {
-								stepSet[key] = true
-								steps = append(steps, s)
-							}
-						}
-					}
-
-					// Add step to create the ingredient using alternative
-					// Verify tier constraints for this step
-					ingTier := getTier(ingredient, tierMap)
-					alt1Tier := getTier(altCombo[0], tierMap)
-					alt2Tier := getTier(altCombo[1], tierMap)
-
-					if alt1Tier < ingTier && alt2Tier < ingTier {
-						ingredientStep := Step{Ingredients: altCombo, Result: ingredient}
-						ingredientKey := [3]string{altCombo[0], altCombo[1], ingredient}
-						if !stepSet[ingredientKey] {
-							stepSet[ingredientKey] = true
-							steps = append(steps, ingredientStep)
-						}
-					} else {
-						return
-					}
-
-					// Add steps for other ingredient
-					for _, path := range otherIngredientPath {
-						for _, s := range path.Steps {
-							key := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
-							if !stepSet[key] {
-								stepSet[key] = true
-								steps = append(steps, s)
-							}
-						}
-					}
-
-					// Add final step to create target
-					// Tier check for final step was already done when building validCombinations
-					finalStep := Step{Ingredients: targetCombo, Result: targetElement}
-					finalKey := [3]string{targetCombo[0], targetCombo[1], targetElement}
-					if !stepSet[finalKey] {
-						stepSet[finalKey] = true
-						steps = append(steps, finalStep)
-					}
-
-					// Create final path
-					finalPath := Path{
-						Steps:     steps,
-						FinalItem: targetElement,
-					}
-
-					// Final check: ensure the whole path is valid
-					if isValidPath(finalPath, tierMap) {
-						signature := generateSimpleSignature(finalPath)
-
-						mu.Lock()
-						totalVisited += localVisited
-
-						if !pathSignatures[signature] && len(allPaths) < maxRecipes {
-							pathSignatures[signature] = true
-							allPaths = append(allPaths, finalPath)
-
-							if len(allPaths) >= maxRecipes {
-								cancel()
-							}
-						}
-						mu.Unlock()
-					}
-				}(combo, ingIndex, ingredient, altCombo)
-			}
-		}
-	}
-
 	wg.Wait()
 
-	// Sort paths by number of steps (shortest first)
+	// Sort hasilnya berdasarkan jumlah langkah
 	sort.Slice(allPaths, func(i, j int) bool {
 		return len(allPaths[i].Steps) < len(allPaths[j].Steps)
 	})
 
-	// Print results
-	if len(allPaths) == 0 {
-		fmt.Println("No valid paths found")
-		return
-	}
-
-	fmt.Printf("\n📦 Total visited nodes: %d\n", totalVisited)
-	fmt.Printf("⏱ Time taken: %v\n", maxDuration)
-
-	if len(allPaths) < maxRecipes {
-		fmt.Printf("Only found %d valid path(s) (requested %d):\n", len(allPaths), maxRecipes)
-	} else {
-		fmt.Printf("Found %d different paths to create %s:\n", len(allPaths), targetElement)
-	}
-
-	for i, path := range allPaths {
-		fmt.Printf("\nRecipe %d with %d steps:\n", i+1, len(path.Steps))
-		for j, step := range path.Steps {
-			fmt.Printf("%d. %s + %s = %s\n", j+1, step.Ingredients[0], step.Ingredients[1], step.Result)
-		}
-	}
+	return allPaths
 }
 
 // Helper to check if an element is in the list of basic elements
@@ -888,11 +606,11 @@ func isValidPath(path Path, tierMap map[string]int) bool {
 	return true
 }
 
-func FindSingleRecipeBFS(recipesFile, targetElement string, startingElements []string) *Path {
+func FindSingleRecipeBFS(recipesFile, targetElement string, startingElements []string) (*Path, int, time.Duration) {
 	recipes, err := LoadRecipes(recipesFile)
 	if err != nil {
 		log.Fatalf("Error loading recipes: %v", err)
-		return nil
+		return nil, 0, 0
 	}
 
 	fmt.Printf("Loaded %d recipes\n", len(recipes))
@@ -903,7 +621,7 @@ func FindSingleRecipeBFS(recipesFile, targetElement string, startingElements []s
 
 	if len(paths) == 0 {
 		fmt.Printf("No path found to create '%s'\n", targetElement)
-		return nil
+		return nil, 0, 0
 	}
 
 	path := paths[0]
@@ -916,20 +634,17 @@ func FindSingleRecipeBFS(recipesFile, targetElement string, startingElements []s
 	fmt.Printf("⏱ Time taken to search: %v\n", duration)
 	fmt.Printf("📦 Nodes visited: %d\n", visited)
 
-	return &path
+	return &path, visited, duration
 }
 
-func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startingElements []string, maxRecipes int) {
+func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startingElements []string, maxRecipes int) []Path {
 	recipes, err := LoadRecipes(recipesFile)
 	if err != nil {
-		log.Fatalf("Error loading recipes: %v", err)
-		return
+		log.Printf("Error loading recipes: %v", err)
+		return nil
 	}
 
-	fmt.Printf("Loaded %d recipes\n", len(recipes))
-	fmt.Printf("Finding up to %d paths to create: %s\n", maxRecipes, targetElement)
-
-	// Build recipe maps for analysis
+	// Build maps
 	elementMap := make(map[string]ElementRecipe)
 	tierMap := make(map[string]int)
 	for _, recipe := range recipes {
@@ -937,76 +652,37 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 		tierMap[recipe.Element] = recipe.Tier
 	}
 
-	// Get the target recipe
 	targetRecipe, exists := elementMap[targetElement]
 	if !exists {
-		fmt.Printf("Target element '%s' not found in recipes\n", targetElement)
-		return
+		log.Printf("Target element '%s' not found in recipes", targetElement)
+		return nil
 	}
 	targetTier := targetRecipe.Tier
 
-	// Find valid combinations that can create the target
-	// Check tier constraints upfront
 	var validCombinations [][2]string
 	for _, combo := range targetRecipe.Recipes {
 		a, b := combo[0], combo[1]
 		aTier := getTier(a, tierMap)
 		bTier := getTier(b, tierMap)
-		// Strict check: Both ingredients must have tier less than target
 		if aTier < targetTier && bTier < targetTier {
 			validCombinations = append(validCombinations, combo)
 		}
 	}
-
 	if len(validCombinations) == 0 {
-		fmt.Printf("No valid recipes found for element '%s'\n", targetElement)
-		return
+		log.Printf("No valid recipes found for element '%s'", targetElement)
+		return nil
 	}
 
-	// Find all alternative paths to the ingredients of the target
-	var alternativeIngredientPaths = make(map[string][][2]string)
-	// For each valid combination to make target
-	for _, combo := range validCombinations {
-		ingredient1, ingredient2 := combo[0], combo[1]
-		// For each non-basic ingredient, find its recipes
-		for _, ingredient := range []string{ingredient1, ingredient2} {
-			// Skip if it's a basic element or we already found alternatives
-			if isBasicElement(ingredient, startingElements) || len(alternativeIngredientPaths[ingredient]) > 0 {
-				continue
-			}
-			// Find the recipes for this ingredient
-			if ingRecipe, exists := elementMap[ingredient]; exists {
-				// Add only valid recipes (tier check)
-				var validRecipes [][2]string
-				ingTier := ingRecipe.Tier
-				for _, ingCombo := range ingRecipe.Recipes {
-					a, b := ingCombo[0], ingCombo[1]
-					aTier := getTier(a, tierMap)
-					bTier := getTier(b, tierMap)
-					// Strict check: Both ingredients must have tier less than this ingredient
-					if aTier < ingTier && bTier < ingTier {
-						validRecipes = append(validRecipes, ingCombo)
-					}
-				}
-				alternativeIngredientPaths[ingredient] = validRecipes
-			}
-		}
-	}
-
-	// Synchronization primitives
+	// Prepare concurrency
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	sem := make(chan struct{}, 10)
 
-	// Results
 	var allPaths []Path
-	var pathSignatures = make(map[string]bool)
-	var totalVisited int
-	var maxDuration time.Duration
+	pathSignatures := make(map[string]bool)
 
-	// First approach: Use the standard direct approach for first set of paths
 	for _, combo := range validCombinations {
 		mu.Lock()
 		if len(allPaths) >= maxRecipes {
@@ -1028,35 +704,20 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 			}
 
 			var combinedPaths []Path
-			localVisited := 0
-
-			// For each ingredient
 			for _, ingredient := range combo {
 				if isBasicElement(ingredient, startingElements) {
 					continue
 				}
-
-				// Find path to this ingredient using BFS
-				ingredientPaths, duration, visited := findPathBFS(recipes, startingElements, ingredient)
-				if len(ingredientPaths) > 0 {
-					// Verify the path follows tier constraints
-					if isValidPath(ingredientPaths[0], tierMap) {
-						combinedPaths = append(combinedPaths, ingredientPaths[0])
-						localVisited += visited
-						mu.Lock()
-						if duration > maxDuration {
-							maxDuration = duration
-						}
-						mu.Unlock()
-					} else {
-						return
-					}
-				} else {
+				paths, _, _ := findPathBFS(recipes, startingElements, ingredient)
+				if len(paths) == 0 {
 					return
 				}
+				if !isValidPath(paths[0], tierMap) {
+					return
+				}
+				combinedPaths = append(combinedPaths, paths[0])
 			}
 
-			// Combine steps without duplicates
 			stepSet := make(map[[3]string]bool)
 			var steps []Step
 			for _, path := range combinedPaths {
@@ -1069,11 +730,9 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 				}
 			}
 
-			// Add final step
 			finalStep := Step{Ingredients: combo, Result: targetElement}
 			key := [3]string{combo[0], combo[1], targetElement}
 			if !stepSet[key] {
-				stepSet[key] = true
 				steps = append(steps, finalStep)
 			}
 
@@ -1081,215 +740,29 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 				Steps:     steps,
 				FinalItem: targetElement,
 			}
-
-			// Final check: ensure the whole path is valid
-			if isValidPath(finalPath, tierMap) {
-				signature := generateSimpleSignature(finalPath)
-				mu.Lock()
-				totalVisited += localVisited
-				if !pathSignatures[signature] && len(allPaths) < maxRecipes {
-					pathSignatures[signature] = true
-					allPaths = append(allPaths, finalPath)
-					if len(allPaths) >= maxRecipes {
-						cancel()
-					}
-				}
-				mu.Unlock()
+			if !isValidPath(finalPath, tierMap) {
+				return
 			}
-		}(combo)
-	}
 
-	// Second approach: Use alternative paths for ingredients
-	for _, combo := range validCombinations {
-		mu.Lock()
-		if len(allPaths) >= maxRecipes {
-			mu.Unlock()
-			break
-		}
-		mu.Unlock()
+			signature := generateSimpleSignature(finalPath)
 
-		// For each ingredient in the combo
-		for ingIndex, ingredient := range combo {
-			// Skip basic elements
-			if isBasicElement(ingredient, startingElements) {
-				continue
-			}
-			// Get alternative ways to create this ingredient
-			alternatives := alternativeIngredientPaths[ingredient]
-			if len(alternatives) == 0 {
-				continue
-			}
-			// Try each alternative recipe for this ingredient
-			for _, altCombo := range alternatives {
-				mu.Lock()
+			mu.Lock()
+			if !pathSignatures[signature] && len(allPaths) < maxRecipes {
+				pathSignatures[signature] = true
+				allPaths = append(allPaths, finalPath)
 				if len(allPaths) >= maxRecipes {
-					mu.Unlock()
-					break
+					cancel()
 				}
-				mu.Unlock()
-
-				sem <- struct{}{}
-				wg.Add(1)
-				go func(targetCombo [2]string, ingIndex int, ingredient string, altCombo [2]string) {
-					defer wg.Done()
-					defer func() { <-sem }()
-
-					select {
-					case <-ctx.Done():
-						return
-					default:
-					}
-
-					// Step 1: Find paths for both ingredients of the alternative combo
-					var altIngredientPaths []Path
-					localVisited := 0
-					for _, altIng := range altCombo {
-						if isBasicElement(altIng, startingElements) {
-							continue
-						}
-						paths, duration, visited := findPathBFS(recipes, startingElements, altIng)
-						if len(paths) > 0 {
-							// Verify path follows tier constraints
-							if isValidPath(paths[0], tierMap) {
-								altIngredientPaths = append(altIngredientPaths, paths[0])
-								localVisited += visited
-								mu.Lock()
-								if duration > maxDuration {
-									maxDuration = duration
-								}
-								mu.Unlock()
-							} else {
-								return
-							}
-						} else {
-							return
-						}
-					}
-
-					// Step 2: Find path for the other ingredient in the target combo
-					var otherIngredientPath []Path
-					otherIngredient := targetCombo[1-ingIndex]
-					if !isBasicElement(otherIngredient, startingElements) {
-						paths, duration, visited := findPathBFS(recipes, startingElements, otherIngredient)
-						if len(paths) > 0 {
-							// Verify path follows tier constraints
-							if isValidPath(paths[0], tierMap) {
-								otherIngredientPath = append(otherIngredientPath, paths[0])
-								localVisited += visited
-								mu.Lock()
-								if duration > maxDuration {
-									maxDuration = duration
-								}
-								mu.Unlock()
-							} else {
-								return
-							}
-						} else {
-							return
-						}
-					}
-
-					// Step 3: Combine all steps
-					stepSet := make(map[[3]string]bool)
-					var steps []Step
-					// Add steps for alternative ingredients
-					for _, path := range altIngredientPaths {
-						for _, s := range path.Steps {
-							key := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
-							if !stepSet[key] {
-								stepSet[key] = true
-								steps = append(steps, s)
-							}
-						}
-					}
-
-					// Add step to create the ingredient using alternative
-					// Verify tier constraints for this step
-					ingTier := getTier(ingredient, tierMap)
-					alt1Tier := getTier(altCombo[0], tierMap)
-					alt2Tier := getTier(altCombo[1], tierMap)
-					if alt1Tier < ingTier && alt2Tier < ingTier {
-						ingredientStep := Step{Ingredients: altCombo, Result: ingredient}
-						ingredientKey := [3]string{altCombo[0], altCombo[1], ingredient}
-						if !stepSet[ingredientKey] {
-							stepSet[ingredientKey] = true
-							steps = append(steps, ingredientStep)
-						}
-					} else {
-						return
-					}
-
-					// Add steps for other ingredient
-					for _, path := range otherIngredientPath {
-						for _, s := range path.Steps {
-							key := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
-							if !stepSet[key] {
-								stepSet[key] = true
-								steps = append(steps, s)
-							}
-						}
-					}
-
-					// Add final step to create target
-					// Tier check for final step was already done when building validCombinations
-					finalStep := Step{Ingredients: targetCombo, Result: targetElement}
-					finalKey := [3]string{targetCombo[0], targetCombo[1], targetElement}
-					if !stepSet[finalKey] {
-						stepSet[finalKey] = true
-						steps = append(steps, finalStep)
-					}
-
-					// Create final path
-					finalPath := Path{
-						Steps:     steps,
-						FinalItem: targetElement,
-					}
-
-					// Final check: ensure the whole path is valid
-					if isValidPath(finalPath, tierMap) {
-						signature := generateSimpleSignature(finalPath)
-						mu.Lock()
-						totalVisited += localVisited
-						if !pathSignatures[signature] && len(allPaths) < maxRecipes {
-							pathSignatures[signature] = true
-							allPaths = append(allPaths, finalPath)
-							if len(allPaths) >= maxRecipes {
-								cancel()
-							}
-						}
-						mu.Unlock()
-					}
-				}(combo, ingIndex, ingredient, altCombo)
 			}
-		}
+			mu.Unlock()
+		}(combo)
 	}
 
 	wg.Wait()
 
-	// Sort paths by number of steps (shortest first)
 	sort.Slice(allPaths, func(i, j int) bool {
 		return len(allPaths[i].Steps) < len(allPaths[j].Steps)
 	})
 
-	// Print results
-	if len(allPaths) == 0 {
-		fmt.Println("No valid paths found")
-		return
-	}
-
-	fmt.Printf("\n📦 Total visited nodes: %d\n", totalVisited)
-	fmt.Printf("⏱ Time taken: %v\n", maxDuration)
-
-	if len(allPaths) < maxRecipes {
-		fmt.Printf("Only found %d valid path(s) (requested %d):\n", len(allPaths), maxRecipes)
-	} else {
-		fmt.Printf("Found %d different paths to create %s:\n", len(allPaths), targetElement)
-	}
-
-	for i, path := range allPaths {
-		fmt.Printf("\nRecipe %d with %d steps:\n", i+1, len(path.Steps))
-		for j, step := range path.Steps {
-			fmt.Printf("%d. %s + %s = %s\n", j+1, step.Ingredients[0], step.Ingredients[1], step.Result)
-		}
-	}
+	return allPaths
 }

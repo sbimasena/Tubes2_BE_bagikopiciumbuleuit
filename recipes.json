@@ -19156,8 +19156,6 @@
       ]
     ],
     "tier": 15
-<<<<<<< HEAD
-=======
   },
   {
     "element": "Earth",
@@ -19170,6 +19168,5 @@
     "image_url": "https://static.wikia.nocookie.net/little-alchemy/images/6/63/Time_2.svg/revision/latest?cb=20210827124225",
     "recipes": [],
     "tier": 0
->>>>>>> origin/main
   }
 ]
