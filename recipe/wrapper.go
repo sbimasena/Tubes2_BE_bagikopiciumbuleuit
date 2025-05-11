@@ -66,10 +66,10 @@ func FindMultipleRecipesBi(
 	maxPaths int,
 	tierMap map[string]int,
 	bidiStrategy ...string, // optional
-) ([][]string, []map[string][]string, int) {
+) ([][]string, []map[string][]string, int, time.Duration) {
 	if algorithm == "bidirectional" {
 		if len(bidiStrategy) == 0 {
-			return nil, nil, 0
+			return nil, nil, 0, 0
 		}
 		strategy := bidiStrategy[0]
 		switch strategy {
@@ -78,14 +78,14 @@ func FindMultipleRecipesBi(
 		case "bfs":
 			return BiSearchMultipleBFS(target, elements, basicElements, maxPaths, tierMap)
 		default:
-			return nil, nil, 0
+			return nil, nil, 0, 0
 		}
 	} else if algorithm == "dfs" {
 		return BiSearchMultipleDFS(target, elements, basicElements, maxPaths, tierMap)
 	} else if algorithm == "bfs" {
 		return BiSearchMultipleBFS(target, elements, basicElements, maxPaths, tierMap)
 	}
-	return nil, nil, 0
+	return nil, nil, 0, 0
 }
 
 func LoadElements(filename string) ([]ElementData, error) {
@@ -120,7 +120,7 @@ func PrepareElementMaps(elements []ElementData) (map[string][][]string, map[stri
 	return recipeMap, tierMap, basicElements
 }
 
-func BiSearchMultipleBFS(target string, elements map[string][][]string, basicElements map[string]bool, maxPaths int, tierMap map[string]int) ([][]string, []map[string][]string, int) {
+func BiSearchMultipleBFS(target string, elements map[string][][]string, basicElements map[string]bool, maxPaths int, tierMap map[string]int) ([][]string, []map[string][]string, int, time.Duration) {
 	var (
 		paths          [][]string
 		allSteps       []map[string][]string
@@ -177,10 +177,10 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 		fmt.Printf("Found %d different paths\n", len(paths))
 	}
 
-	return paths, allSteps, totalNodes
+	return paths, allSteps, totalNodes, duration
 }
 
-func BiSearchMultipleDFS(target string, elements map[string][][]string, basicElements map[string]bool, maxPaths int, tierMap map[string]int) ([][]string, []map[string][]string, int) {
+func BiSearchMultipleDFS(target string, elements map[string][][]string, basicElements map[string]bool, maxPaths int, tierMap map[string]int) ([][]string, []map[string][]string, int, time.Duration) {
 	var (
 		paths          [][]string
 		allSteps       []map[string][]string
@@ -235,7 +235,7 @@ func BiSearchMultipleDFS(target string, elements map[string][][]string, basicEle
 		fmt.Printf("Found %d different paths\n", len(paths))
 	}
 
-	return paths, allSteps, totalNodes
+	return paths, allSteps, totalNodes, duration
 }
 
 // Fungsi untuk menyalin struktur data elements

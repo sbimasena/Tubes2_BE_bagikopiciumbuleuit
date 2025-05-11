@@ -195,6 +195,14 @@ func main() {
 
 		var result recipe.SearchResult
 
+		bidi := r.URL.Query().Get("bidi")
+		elements, err := recipe.LoadElements("recipes.json")
+		if err != nil {
+			http.Error(w, "Failed to load recipe elements", http.StatusInternalServerError)
+			return
+		}
+		recipeMap, tierMap, basicElements := recipe.PrepareElementMaps(elements)
+
 		switch algorithm {
 		case "dfs":
 			if maxPaths > 1 {
@@ -291,6 +299,41 @@ func main() {
 					NodesVisited: visited,
 					Duration:     duration.String(),
 					Algorithm:    "bfs",
+				}
+			}
+		case "bidirectional":
+			if bidi != "bfs" && bidi != "dfs" {
+				http.Error(w, "Invalid bidi parameter (must be bfs or dfs)", http.StatusBadRequest)
+				return
+			}
+
+			if maxPaths > 1 {
+				paths, steps, totalNodes, duration := recipe.FindMultipleRecipesBi(target, recipeMap, basicElements, bidi, maxPaths, tierMap)
+				if len(paths) == 0 {
+					http.Error(w, "No path found", http.StatusNotFound)
+					return
+				}
+
+				result = recipe.SearchResult{
+					Paths:        paths,
+					Steps:        steps,
+					NodesVisited: totalNodes,
+					Duration:     duration.String(),
+					Algorithm:    "bidirectional-" + bidi,
+				}
+			} else {
+				path, step, visited, duration := recipe.FindSingleRecipeBi(target, recipeMap, basicElements, bidi, tierMap)
+				if path == nil {
+					http.Error(w, "No path found", http.StatusNotFound)
+					return
+				}
+
+				result = recipe.SearchResult{
+					Paths:        [][]string{path},
+					Steps:        []map[string][]string{step},
+					NodesVisited: visited,
+					Duration:     duration.String(),
+					Algorithm:    "bidirectional-" + bidi,
 				}
 			}
 		default:
