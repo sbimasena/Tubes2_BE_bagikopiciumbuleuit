@@ -51,7 +51,7 @@ func getDoc() (*goquery.Document, error) {
 	return goquery.NewDocumentFromReader(res.Body)
 }
 
-func main() {
+func mainScrap() {
 	start := time.Now()
 	doc, err := getDoc()
 	if err != nil {

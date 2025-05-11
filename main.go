@@ -1,100 +1,166 @@
 package main
 
-// import (
-// 	"alchemy/recipe"
-// 	"encoding/json"
-// 	"fmt"
-// 	"os"
-// 	"os/exec"
-// 	"path/filepath"
-// )
+import (
+	"alchemy/recipe"
+	"bufio"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+)
 
-// type Element struct {
-// 	Element string     `json:"element"`
-// 	Recipes [][]string `json:"recipes"`
-// }
+func isElementInRecipes(target string, elements []recipe.ElementData) bool {
+	for _, element := range elements {
+		if element.Element == target {
+			return true
+		}
+	}
 
-// func LoadElements(path string) map[string][][]string {
-// 	file, err := os.ReadFile(path)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	var raw []Element
-// 	if err := json.Unmarshal(file, &raw); err != nil {
-// 		panic(err)
-// 	}
-// 	result := make(map[string][][]string)
-// 	for _, e := range raw {
-// 		result[e.Element] = e.Recipes
-// 	}
-// 	return result
-// }
+	return false
+}
 
-// func ClearFramesFolder() {
-// 	_ = os.Mkdir("frames", 0755)
-// 	files, err := filepath.Glob("frames/*")
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	for _, f := range files {
-// 		_ = os.Remove(f)
-// 	}
-// }
+func main() {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Scraping atau tidak? (y/n): ")
+	scrape, _ := reader.ReadString('\n')
+	scrape = strings.TrimSpace(strings.ToLower(scrape))
+	if scrape == "y" {
+		fmt.Println("Melakukan scraping...")
+		mainScrap()
+	}
+	fmt.Print("Pilih algoritma utama (bfs/dfs/bidirectional): ")
+	mainAlg, _ := reader.ReadString('\n')
+	mainAlg = strings.TrimSpace(strings.ToLower(mainAlg))
 
-// func main() {
-// 	// Set to true to enable step-by-step visualization, false for better performance
-// 	recipe.VisualEnabled = true
+	var bidiAlg string
+	if mainAlg == "bidirectional" {
+		fmt.Print("Pilih metode bidirectional (bfs/dfs): ")
+		bidiAlgRaw, _ := reader.ReadString('\n')
+		bidiAlg = strings.TrimSpace(strings.ToLower(bidiAlgRaw))
+		if bidiAlg != "bfs" && bidiAlg != "dfs" {
+			fmt.Println("Metode bidirectional tidak valid, gunakan bfs atau dfs.")
+			return
+		}
+	}
 
-// 	// Prepare visualization folder
-// 	ClearFramesFolder()
+	fmt.Print("Ingin mencari satu resep atau banyak? (1/multiple): ")
+	mode, _ := reader.ReadString('\n')
+	mode = strings.TrimSpace(strings.ToLower(mode))
 
-// 	// Load data from elements.json
-// 	elements := LoadElements("elements.json")
+	maxPaths := 1
+	if mode == "multiple" {
+		fmt.Print("Berapa jumlah maksimum resep yang ingin dicari? ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		val, err := strconv.Atoi(input)
+		if err == nil && val > 0 {
+			maxPaths = val
+		}
+	}
 
-// 	// Basic elements
-// 	basicElements := map[string]bool{
-// 		"Air": true, "Water": true, "Earth": true, "Fire": true, "Time": true,
-// 	}
+	elements, err := recipe.LoadElements("recipes.json")
+	if err != nil {
+		fmt.Println("Gagal membaca file recipes.json:", err)
+		return
+	}
 
-// 	// Shortest Path
-// 	fmt.Println("== Shortest Recipe ==")
-// 	fmt.Println("Finding shortest recipe for Rain...")
-// 	shortest := recipe.FindShortestRecipe("Rain", elements, basicElements)
-// 	if shortest != nil {
-// 		fmt.Printf("Found recipe with %d steps: %v\n", len(shortest), shortest)
-// 	} else {
-// 		fmt.Println("No recipe found")
-// 	}
+	fmt.Print("Masukkan nama elemen target: ")
+	target, _ := reader.ReadString('\n')
+	target = strings.TrimSpace(target)
 
-// 	// Multiple Paths
-// 	fmt.Println("\n== Multiple Recipes (max 3) ==")
-// 	fmt.Println("Finding multiple recipes for Rain...")
-// 	multiple := recipe.FindMultipleRecipesConcurrent("Rain", elements, basicElements, 3)
-// 	if len(multiple) > 0 {
-// 		for i, path := range multiple {
-// 			fmt.Printf("Recipe %d (%d steps): %v\n", i+1, len(path), path)
-// 		}
-// 	} else {
-// 		fmt.Println("No recipes found")
-// 	}
+	if target == "" || target == " " || target == "\n" {
+		fmt.Println("Nama elemen target tidak boleh kosong.")
+		return
+	}
 
-// 	if recipe.VisualEnabled {
-// 		fmt.Println("\nVisualization files saved to the 'frames' folder")
+	if !isElementInRecipes(target, elements) {
+		fmt.Println("Elemen target tidak ditemukan dalam database.")
+		return
+	}
 
-// 		// Convert DOT files to PNG using Graphviz
-// 		fmt.Println("Converting DOT files to PNG...")
-// 		files, err := filepath.Glob("frames/*.dot")
-// 		if err == nil {
-// 			for _, file := range files {
-// 				outPng := file[:len(file)-4] + ".png"
-// 				cmd := exec.Command("dot", "-Tpng", file, "-o", outPng)
-// 				err := cmd.Run()
-// 				if err != nil {
-// 					fmt.Printf("Error converting %s: %v\n", file, err)
-// 				}
-// 			}
-// 		}
+	recipeMap, tierMap, basicElements := recipe.PrepareElementMaps(elements)
 
-// 		fmt.Println("Done! You can view the step-by-step visualizations as PNG files")
-// 	}
-// }
+	var (
+		paths [][]string
+		steps []map[string][]string
+	)
+
+	switch mainAlg {
+	case "dfs":
+		if mode == "multiple" {
+			recipe.FindMultipleRecipesConcurrent("recipes.json", target, keys(basicElements), maxPaths)
+			return
+		} else {
+			recipe.FindSingleRecipeDFS("recipes.json", target, keys(basicElements))
+			return
+		}
+	case "bidirectional":
+		if bidiAlg == "dfs" {
+			if mode == "multiple" {
+				paths, steps, _ = recipe.FindMultipleRecipes(target, recipeMap, basicElements, "dfs", maxPaths, tierMap)
+			} else {
+				path, step, visited, dur := recipe.FindSingleRecipe(target, recipeMap, basicElements, "dfs", tierMap)
+				if path != nil {
+					paths = append(paths, path)
+					steps = append(steps, step)
+					fmt.Println("\nTotal simpul yang dieksplorasi:", visited)
+					fmt.Println("Waktu eksekusi:", dur)
+				}
+			}
+		} else {
+			if mode == "multiple" {
+				paths, steps, _ = recipe.FindMultipleRecipes(target, recipeMap, basicElements, "bfs", maxPaths, tierMap)
+			} else {
+				path, step, visited, dur := recipe.FindSingleRecipe(target, recipeMap, basicElements, "bfs", tierMap)
+				if path != nil {
+					paths = append(paths, path)
+					steps = append(steps, step)
+					fmt.Println("\nTotal simpul yang dieksplorasi:", visited)
+					fmt.Println("Waktu eksekusi:", dur)
+				}
+			}
+		}
+	default: // bfs
+		if mode == "multiple" {
+			recipe.FindMultipleRecipesBFSConcurrent("recipes.json", target, keys(basicElements), maxPaths)
+		} else {
+			recipe.FindSingleRecipeBFS("recipes.json", target, keys(basicElements))
+			return
+		}
+	}
+
+	fmt.Println("\nHasil:")
+	fmt.Printf("Ditemukan %d jalur resep.\n", len(paths))
+
+	for i := range paths {
+		stepMap := steps[i]
+		fmt.Printf("\nResep ke-%d:\n", i+1)
+		counter := 1
+		printed := make(map[string]bool)
+
+		var printSteps func(res string)
+		printSteps = func(res string) {
+			if printed[res] {
+				return
+			}
+			ing, ok := stepMap[res]
+			if !ok {
+				return
+			}
+			printSteps(ing[0])
+			printSteps(ing[1])
+			fmt.Printf("%d. %s + %s = %s\n", counter, ing[0], ing[1], res)
+			counter++
+			printed[res] = true
+		}
+		printSteps(target)
+	}
+}
+
+func keys(m map[string]bool) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
