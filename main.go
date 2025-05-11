@@ -1,100 +1,343 @@
 package main
 
-// import (
-// 	"alchemy/recipe"
-// 	"encoding/json"
-// 	"fmt"
-// 	"os"
-// 	"os/exec"
-// 	"path/filepath"
-// )
+import (
+	"alchemy/recipe"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"strconv"
+)
 
-// type Element struct {
-// 	Element string     `json:"element"`
-// 	Recipes [][]string `json:"recipes"`
-// }
+// func isElementInRecipes(target string, elements []recipe.ElementData) bool {
+// 	for _, element := range elements {
+// 		if element.Element == target {
+// 			return true
+// 		}
+// 	}
 
-// func LoadElements(path string) map[string][][]string {
-// 	file, err := os.ReadFile(path)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	var raw []Element
-// 	if err := json.Unmarshal(file, &raw); err != nil {
-// 		panic(err)
-// 	}
-// 	result := make(map[string][][]string)
-// 	for _, e := range raw {
-// 		result[e.Element] = e.Recipes
-// 	}
-// 	return result
-// }
-
-// func ClearFramesFolder() {
-// 	_ = os.Mkdir("frames", 0755)
-// 	files, err := filepath.Glob("frames/*")
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	for _, f := range files {
-// 		_ = os.Remove(f)
-// 	}
+// 	return false
 // }
 
 // func main() {
-// 	// Set to true to enable step-by-step visualization, false for better performance
-// 	recipe.VisualEnabled = true
-
-// 	// Prepare visualization folder
-// 	ClearFramesFolder()
-
-// 	// Load data from elements.json
-// 	elements := LoadElements("elements.json")
-
-// 	// Basic elements
-// 	basicElements := map[string]bool{
-// 		"Air": true, "Water": true, "Earth": true, "Fire": true, "Time": true,
+// 	reader := bufio.NewReader(os.Stdin)
+// 	fmt.Print("Scraping atau tidak? (y/n): ")
+// 	scrape, _ := reader.ReadString('\n')
+// 	scrape = strings.TrimSpace(strings.ToLower(scrape))
+// 	if scrape == "y" {
+// 		fmt.Println("Melakukan scraping...")
+// 		mainScrap()
 // 	}
+// 	fmt.Print("Pilih algoritma utama (bfs/dfs/bidirectional): ")
+// 	mainAlg, _ := reader.ReadString('\n')
+// 	mainAlg = strings.TrimSpace(strings.ToLower(mainAlg))
 
-// 	// Shortest Path
-// 	fmt.Println("== Shortest Recipe ==")
-// 	fmt.Println("Finding shortest recipe for Rain...")
-// 	shortest := recipe.FindShortestRecipe("Rain", elements, basicElements)
-// 	if shortest != nil {
-// 		fmt.Printf("Found recipe with %d steps: %v\n", len(shortest), shortest)
-// 	} else {
-// 		fmt.Println("No recipe found")
-// 	}
-
-// 	// Multiple Paths
-// 	fmt.Println("\n== Multiple Recipes (max 3) ==")
-// 	fmt.Println("Finding multiple recipes for Rain...")
-// 	multiple := recipe.FindMultipleRecipesConcurrent("Rain", elements, basicElements, 3)
-// 	if len(multiple) > 0 {
-// 		for i, path := range multiple {
-// 			fmt.Printf("Recipe %d (%d steps): %v\n", i+1, len(path), path)
+// 	var bidiAlg string
+// 	if mainAlg == "bidirectional" {
+// 		fmt.Print("Pilih metode bidirectional (bfs/dfs): ")
+// 		bidiAlgRaw, _ := reader.ReadString('\n')
+// 		bidiAlg = strings.TrimSpace(strings.ToLower(bidiAlgRaw))
+// 		if bidiAlg != "bfs" && bidiAlg != "dfs" {
+// 			fmt.Println("Metode bidirectional tidak valid, gunakan bfs atau dfs.")
+// 			return
 // 		}
-// 	} else {
-// 		fmt.Println("No recipes found")
 // 	}
 
-// 	if recipe.VisualEnabled {
-// 		fmt.Println("\nVisualization files saved to the 'frames' folder")
+// 	fmt.Print("Ingin mencari satu resep atau banyak? (1/multiple): ")
+// 	mode, _ := reader.ReadString('\n')
+// 	mode = strings.TrimSpace(strings.ToLower(mode))
 
-// 		// Convert DOT files to PNG using Graphviz
-// 		fmt.Println("Converting DOT files to PNG...")
-// 		files, err := filepath.Glob("frames/*.dot")
-// 		if err == nil {
-// 			for _, file := range files {
-// 				outPng := file[:len(file)-4] + ".png"
-// 				cmd := exec.Command("dot", "-Tpng", file, "-o", outPng)
-// 				err := cmd.Run()
-// 				if err != nil {
-// 					fmt.Printf("Error converting %s: %v\n", file, err)
+// 	maxPaths := 1
+// 	if mode == "multiple" {
+// 		fmt.Print("Berapa jumlah maksimum resep yang ingin dicari? ")
+// 		input, _ := reader.ReadString('\n')
+// 		input = strings.TrimSpace(input)
+// 		val, err := strconv.Atoi(input)
+// 		if err == nil && val > 0 {
+// 			maxPaths = val
+// 		}
+// 	}
+
+// 	elements, err := recipe.LoadElements("recipes.json")
+// 	if err != nil {
+// 		fmt.Println("Gagal membaca file recipes.json:", err)
+// 		return
+// 	}
+
+// 	fmt.Print("Masukkan nama elemen target: ")
+// 	target, _ := reader.ReadString('\n')
+// 	target = strings.TrimSpace(target)
+
+// 	if target == "" || target == " " || target == "\n" {
+// 		fmt.Println("Nama elemen target tidak boleh kosong.")
+// 		return
+// 	}
+
+// 	if !isElementInRecipes(target, elements) {
+// 		fmt.Println("Elemen target tidak ditemukan dalam database.")
+// 		return
+// 	}
+
+// 	recipeMap, tierMap, basicElements := recipe.PrepareElementMaps(elements)
+
+// 	var (
+// 		paths [][]string
+// 		steps []map[string][]string
+// 	)
+
+// 	switch mainAlg {
+// 	case "dfs":
+// 		if mode == "multiple" {
+// 			recipe.FindMultipleRecipesConcurrent("recipes.json", target, keys(basicElements), maxPaths)
+// 			return
+// 		} else {
+// 			recipe.FindSingleRecipeDFS("recipes.json", target, keys(basicElements))
+// 			return
+// 		}
+// 	case "bidirectional":
+// 		if bidiAlg == "dfs" {
+// 			if mode == "multiple" {
+// 				paths, steps, _ = recipe.FindMultipleRecipes(target, recipeMap, basicElements, "dfs", maxPaths, tierMap)
+// 			} else {
+// 				path, step, visited, dur := recipe.FindSingleRecipe(target, recipeMap, basicElements, "dfs", tierMap)
+// 				if path != nil {
+// 					paths = append(paths, path)
+// 					steps = append(steps, step)
+// 					fmt.Println("\nTotal simpul yang dieksplorasi:", visited)
+// 					fmt.Println("Waktu eksekusi:", dur)
+// 				}
+// 			}
+// 		} else {
+// 			if mode == "multiple" {
+// 				paths, steps, _ = recipe.FindMultipleRecipes(target, recipeMap, basicElements, "bfs", maxPaths, tierMap)
+// 			} else {
+// 				path, step, visited, dur := recipe.FindSingleRecipe(target, recipeMap, basicElements, "bfs", tierMap)
+// 				if path != nil {
+// 					paths = append(paths, path)
+// 					steps = append(steps, step)
+// 					fmt.Println("\nTotal simpul yang dieksplorasi:", visited)
+// 					fmt.Println("Waktu eksekusi:", dur)
 // 				}
 // 			}
 // 		}
+// 	default: // bfs
+// 		if mode == "multiple" {
+// 			recipe.FindMultipleRecipesBFSConcurrent("recipes.json", target, keys(basicElements), maxPaths)
+// 		} else {
+// 			recipe.FindSingleRecipeBFS("recipes.json", target, keys(basicElements))
+// 			return
+// 		}
+// 	}
 
-// 		fmt.Println("Done! You can view the step-by-step visualizations as PNG files")
+// 	fmt.Println("\nHasil:")
+// 	fmt.Printf("Ditemukan %d jalur resep.\n", len(paths))
+
+// 	for i := range paths {
+// 		stepMap := steps[i]
+// 		fmt.Printf("\nResep ke-%d:\n", i+1)
+// 		counter := 1
+// 		printed := make(map[string]bool)
+
+// 		var printSteps func(res string)
+// 		printSteps = func(res string) {
+// 			if printed[res] {
+// 				return
+// 			}
+// 			ing, ok := stepMap[res]
+// 			if !ok {
+// 				return
+// 			}
+// 			printSteps(ing[0])
+// 			printSteps(ing[1])
+// 			fmt.Printf("%d. %s + %s = %s\n", counter, ing[0], ing[1], res)
+// 			counter++
+// 			printed[res] = true
+// 		}
+// 		printSteps(target)
 // 	}
 // }
+
+// func keys(m map[string]bool) []string {
+// 	var out []string
+// 	for k := range m {
+// 		out = append(out, k)
+// 	}
+// 	return out
+// }
+
+func main() {
+	mux := http.NewServeMux()
+
+	// 🔍 SEARCH HANDLER
+	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
+		target := r.URL.Query().Get("target")
+		if target == "" {
+			http.Error(w, "Missing target", http.StatusBadRequest)
+			return
+		}
+
+		algorithm := r.URL.Query().Get("algorithm")
+		if algorithm == "" {
+			algorithm = "dfs"
+		}
+
+		maxPaths := 1
+		if mp := r.URL.Query().Get("maxPaths"); mp != "" {
+			if val, err := strconv.Atoi(mp); err == nil && val > 0 {
+				maxPaths = val
+			} else {
+				http.Error(w, "Invalid maxPaths", http.StatusBadRequest)
+				return
+			}
+		}
+
+		startingElements := []string{"Air", "Earth", "Fire", "Water"}
+
+		var result recipe.SearchResult
+
+		switch algorithm {
+		case "dfs":
+			if maxPaths > 1 {
+				paths, visited, duration := recipe.FindMultipleRecipesDFSConcurrent("recipes.json", target, startingElements, maxPaths)
+				if len(paths) == 0 {
+					http.Error(w, "No path found", http.StatusNotFound)
+					return
+				}
+				fmt.Printf("DEBUG: total %d paths returned\n", len(paths))
+
+				var converted [][]string
+				var stepsList []map[string][]string
+				for _, p := range paths {
+					var pathSteps []string
+					stepMap := make(map[string][]string)
+					for _, s := range p.Steps {
+						pathSteps = append(pathSteps, s.Result)
+						stepMap[s.Result] = []string{s.Ingredients[0], s.Ingredients[1]}
+					}
+					converted = append(converted, pathSteps)
+					stepsList = append(stepsList, stepMap)
+				}
+
+				result = recipe.SearchResult{
+					Paths:        converted,
+					Steps:        stepsList,
+					NodesVisited: visited,
+					Duration:     duration.String(),
+					Algorithm:    "dfs",
+				}
+			} else {
+				path, visited, duration := recipe.FindSingleRecipeDFS("recipes.json", target, startingElements)
+				if path == nil {
+					http.Error(w, "No path found", http.StatusNotFound)
+					return
+				}
+				stepMap := make(map[string][]string)
+				var pathList []string
+				for _, s := range path.Steps {
+					stepMap[s.Result] = []string{s.Ingredients[0], s.Ingredients[1]}
+					pathList = append(pathList, s.Result)
+				}
+				result = recipe.SearchResult{
+					Paths:        [][]string{pathList},
+					Steps:        []map[string][]string{stepMap},
+					NodesVisited: visited,
+					Duration:     duration.String(),
+					Algorithm:    "dfs",
+				}
+			}
+		case "bfs":
+			if maxPaths > 1 {
+				paths, visited, duration := recipe.FindMultipleRecipesBFSConcurrent("recipes.json", target, startingElements, maxPaths)
+				if len(paths) == 0 {
+					http.Error(w, "No path found", http.StatusNotFound)
+					return
+				}
+
+				var converted [][]string
+				var stepsList []map[string][]string
+				for _, p := range paths {
+					var pathSteps []string
+					stepMap := make(map[string][]string)
+					for _, s := range p.Steps {
+						pathSteps = append(pathSteps, s.Result)
+						stepMap[s.Result] = []string{s.Ingredients[0], s.Ingredients[1]}
+					}
+					converted = append(converted, pathSteps)
+					stepsList = append(stepsList, stepMap)
+				}
+
+				result = recipe.SearchResult{
+					Paths:        converted,
+					Steps:        stepsList,
+					NodesVisited: visited,
+					Duration:     duration.String(),
+					Algorithm:    "bfs",
+				}
+			} else {
+				path, visited, duration := recipe.FindSingleRecipeBFS("recipes.json", target, startingElements)
+				if path == nil {
+					http.Error(w, "No path found", http.StatusNotFound)
+					return
+				}
+				stepMap := make(map[string][]string)
+				var pathList []string
+				for _, s := range path.Steps {
+					stepMap[s.Result] = []string{s.Ingredients[0], s.Ingredients[1]}
+					pathList = append(pathList, s.Result)
+				}
+				result = recipe.SearchResult{
+					Paths:        [][]string{pathList},
+					Steps:        []map[string][]string{stepMap},
+					NodesVisited: visited,
+					Duration:     duration.String(),
+					Algorithm:    "bfs",
+				}
+			}
+		default:
+			http.Error(w, "Unknown algorithm", http.StatusBadRequest)
+			return
+		}
+
+		writeJSON(w, result)
+	})
+
+	// 🧲 SCRAPING HANDLER
+	mux.HandleFunc("/api/scrape", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		fmt.Println("Scraping triggered via API...")
+		if err := mainScrap(); err != nil {
+			http.Error(w, "Scraping failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Scraping completed successfully"))
+	})
+
+	fmt.Println("🌐 Server running at http://localhost:8080")
+	log.Fatal(http.ListenAndServe(":8080", withCORS(mux)))
+}
+
+func writeJSON(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}

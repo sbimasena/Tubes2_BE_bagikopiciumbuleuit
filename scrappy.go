@@ -51,7 +51,7 @@ func getDoc() (*goquery.Document, error) {
 	return goquery.NewDocumentFromReader(res.Body)
 }
 
-func main() {
+func mainScrap() error {
 	start := time.Now()
 	doc, err := getDoc()
 	if err != nil {
@@ -513,12 +513,6 @@ func main() {
 			Recipes:  [][2]string{},
 			Tier:     0,
 		},
-		{
-			Element:  "Time",
-			ImageURL: "https://static.wikia.nocookie.net/little-alchemy/images/6/63/Time_2.svg/revision/latest?cb=20210827124225",
-			Recipes:  [][2]string{},
-			Tier:     0,
-		},
 	}
 
 	results = append(results, manualBasics...)
@@ -534,4 +528,6 @@ func main() {
 	enc.Encode(results)
 
 	fmt.Printf("✅ Selesai dalam %s, total elemen: %d\n", time.Since(start), len(results))
+
+	return err
 }
