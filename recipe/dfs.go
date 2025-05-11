@@ -56,22 +56,16 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 	memo := make(map[string]bool)
 	visitedCounter := make(map[string]bool)
 
-	var dfs func(string, map[string]bool) *Path
-	dfs = func(current string, visited map[string]bool) *Path {
+	var dfs func(string) *Path
+	dfs = func(current string) *Path {
 		if basics[current] {
 			return &Path{Steps: []Step{}, FinalItem: current}
-		}
-
-		if visited[current] {
-			return nil
 		}
 
 		if success, ok := memo[current]; ok && !success {
 			return nil
 		}
 
-		visited[current] = true
-		defer delete(visited, current)
 		visitedCounter[current] = true
 
 		combos, ok := recipeMap[current]
@@ -94,12 +88,12 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 				continue
 			}
 
-			pathA := dfs(a, visited)
+			pathA := dfs(a)
 			if pathA == nil {
 				continue
 			}
 
-			pathB := dfs(b, visited)
+			pathB := dfs(b)
 			if pathB == nil {
 				continue
 			}
@@ -115,7 +109,6 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 					steps = append(steps, s)
 				}
 			}
-
 			for _, s := range pathB.Steps {
 				k := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
 				if !stepSet[k] {
@@ -134,13 +127,10 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 			return &Path{Steps: steps, FinalItem: current}
 		}
 
-		// kalau semua kombinasi gagal
 		memo[current] = false
 		return nil
 	}
-
-	visited := make(map[string]bool)
-	path := dfs(target, visited)
+	path := dfs(target)
 	duration := time.Since(startTime)
 
 	if path != nil {
