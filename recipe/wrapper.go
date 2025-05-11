@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math/rand"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -106,7 +107,6 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 			break
 		}
 
-		// Copy and optionally shuffle elements
 		elementsCopy := copyElements(elements)
 		shuffleRecipes(elementsCopy, attempt)
 
@@ -121,12 +121,7 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 			done <- true
 		}()
 
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
-			fmt.Printf("Search attempt %d timed out\n", attempt)
-			continue
-		}
+		<-done
 
 		if p == nil {
 			continue
@@ -142,13 +137,12 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 		allSteps = append(allSteps, s)
 		totalNodes += n
 
-		fmt.Printf("Path #%d found (length: %d)\n", len(paths), len(p))
 	}
 
 	duration := time.Since(startTime)
 
-	fmt.Printf("\n📦 Total nodes explored: %d\n", totalNodes)
-	fmt.Printf("⏱ Total execution time: %v\n", duration)
+	fmt.Printf("Total nodes explored: %d\n", totalNodes)
+	fmt.Printf("Total execution time: %v\n", duration)
 
 	if len(paths) < maxPaths {
 		fmt.Printf("Only found %d different paths (of %d requested)\n", len(paths), maxPaths)
@@ -160,74 +154,54 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 }
 
 func BiSearchMultipleDFS(target string, elements map[string][][]string, basicElements map[string]bool, maxPaths int, tierMap map[string]int) ([][]string, []map[string][]string, int) {
-	// Prepare results
 	var paths [][]string
 	var allSteps []map[string][]string
 	totalNodes := 0
 	startTime := time.Now()
 
-	// Track found paths
 	pathSignatures := make(map[string]bool)
 
-	// Copy elements once at the beginning
 	originalElements := copyElements(elements)
 
 	fmt.Println("Finding up to", maxPaths, "different paths for", target)
 
-	// Run searches sequentially to ensure absolute purity
-	for attempt := range maxPaths * 3 {
+	for i := 0; i < maxPaths*3; i++ {
 		if len(paths) >= maxPaths {
 			break
 		}
 
-		// Use pure bidirectional DFS with timeout
 		var p []string
 		var s map[string][]string
 		var n int
 
-		// Channel for search completion
 		done := make(chan bool)
 
 		go func() {
-			// Use original elements without any modifications
 			p, s, n, _ = BiSearchDFS(target, originalElements, basicElements, tierMap)
 			done <- true
 		}()
 
-		// Wait for result with timeout
-		select {
-		case <-done:
-			// Continue processing
-		case <-time.After(3 * time.Second):
-			fmt.Printf("Search attempt %d timed out\n", attempt)
+		<-done
+
+		if p == nil {
 			continue
 		}
 
-		if p == nil {
-			continue // No path found
-		}
+		signature := fmt.Sprintf("%v", p)
 
-		// Generate a signature for this path
-		signature := fmt.Sprintf("%v", p) // Simple signature based on path elements
-
-		// Check if this is a unique path
 		if !pathSignatures[signature] {
-			// Add to results
 			pathSignatures[signature] = true
 			paths = append(paths, p)
 			allSteps = append(allSteps, s)
 			totalNodes += n
-
-			fmt.Printf("Path #%d found (length: %d)\n", len(paths), len(p))
 		}
 	}
 
-	// Calculate total duration
 	duration := time.Since(startTime)
 
 	// Print results
-	fmt.Printf("\n📦 Total nodes explored: %d\n", totalNodes)
-	fmt.Printf("⏱ Total execution time: %v\n", duration)
+	fmt.Printf("Total nodes explored: %d\n", totalNodes)
+	fmt.Printf("Total execution time: %v\n", duration)
 
 	if len(paths) < maxPaths {
 		fmt.Printf("Only found %d different paths (of %d requested)\n", len(paths), maxPaths)
@@ -243,7 +217,6 @@ func copyElements(elements map[string][][]string) map[string][][]string {
 	result := make(map[string][][]string)
 
 	for elem, recipes := range elements {
-		// Salin recipes
 		recipesCopy := make([][]string, len(recipes))
 		for i, recipe := range recipes {
 			recipeCopy := make([]string, len(recipe))
@@ -257,25 +230,21 @@ func copyElements(elements map[string][][]string) map[string][][]string {
 	return result
 }
 
-// Generate a unique signature for a path based on all steps
 func generateSignature(path Path) string {
-	// Create a map to store ingredient combinations used in the path
+
 	stepMap := make(map[string]bool)
 
-	// Add each step to the map
 	for _, step := range path.Steps {
 		key := fmt.Sprintf("%s+%s=%s", step.Ingredients[0], step.Ingredients[1], step.Result)
 		stepMap[key] = true
 	}
 
-	// Create a sorted list of steps for consistent signature
 	var steps []string
 	for step := range stepMap {
 		steps = append(steps, step)
 	}
 	sort.Strings(steps)
 
-	// Join all steps into a single string
 	signature := ""
 	for _, step := range steps {
 		signature += step + "|"
@@ -284,7 +253,6 @@ func generateSignature(path Path) string {
 	return signature
 }
 
-// Function to find a single recipe
 func FindSingleRecipeDFS(recipesFile, targetElement string, startingElements []string) *Path {
 	recipes, err := LoadRecipes(recipesFile)
 	if err != nil {
@@ -292,10 +260,6 @@ func FindSingleRecipeDFS(recipesFile, targetElement string, startingElements []s
 		return nil
 	}
 
-	fmt.Printf("Loaded %d recipes\n", len(recipes))
-	fmt.Printf("Finding path to create: %s\n", targetElement)
-
-	// Cari path + info durasi dan node
 	paths, duration, visited := findPathDFS(recipes, startingElements, targetElement)
 
 	if len(paths) == 0 {
@@ -309,9 +273,8 @@ func FindSingleRecipeDFS(recipesFile, targetElement string, startingElements []s
 		fmt.Printf("%d. %s + %s = %s\n", i+1, step.Ingredients[0], step.Ingredients[1], step.Result)
 	}
 
-	// Tambahan info
-	fmt.Printf("⏱ Time taken to search: %v\n", duration)
-	fmt.Printf("📦 Nodes visited: %d\n", visited)
+	fmt.Printf("Time taken to search: %v\n", duration)
+	fmt.Printf("Nodes visited: %d\n", visited)
 
 	return &path
 }
@@ -322,9 +285,6 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 		log.Fatalf("Error loading recipes: %v", err)
 		return
 	}
-
-	fmt.Printf("Loaded %d recipes\n", len(recipes))
-	fmt.Printf("Finding up to %d paths to create: %s\n", maxRecipes, targetElement)
 
 	// Check if target exists
 	found := false
@@ -374,13 +334,11 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 				pathSignatures[sig] = true
 				allPaths = append(allPaths, result.path)
 				totalVisited += result.visited
-				fmt.Printf("Found path #%d with %d steps (variation %d)\n", len(allPaths), len(result.path.Steps), result.varIdx)
 			}
 			mu.Unlock()
 		}
 	}()
 
-	// Launch all variations
 	for varIdx, recipeVariation := range variations {
 		mu.Lock()
 		if len(allPaths) >= maxRecipes {
@@ -408,26 +366,20 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 				innerChan <- localResult{paths, visited}
 			}()
 
-			select {
-			case result := <-innerChan:
-				if len(result.paths) > 0 {
-					resultChan <- struct {
-						path    Path
-						visited int
-						varIdx  int
-					}{result.paths[0], result.visited, idx}
-				}
-			case <-time.After(5 * time.Second):
-				fmt.Printf("Search variation %d timed out\n", idx)
+			result := <-innerChan
+			if len(result.paths) > 0 {
+				resultChan <- struct {
+					path    Path
+					visited int
+					varIdx  int
+				}{result.paths[0], result.visited, idx}
 			}
 		}(recipeVariation, varIdx)
 	}
 
-	// Wait until all search goroutines finish
 	wg.Wait()
 	close(resultChan)
 
-	// Sort and print results
 	sort.Slice(allPaths, func(i, j int) bool {
 		return len(allPaths[i].Steps) < len(allPaths[j].Steps)
 	})
@@ -438,8 +390,8 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 		return
 	}
 
-	fmt.Printf("\n📦 Total visited nodes: %d\n", totalVisited)
-	fmt.Printf("⏱ Time taken: %v\n", duration)
+	fmt.Printf("\nTotal visited nodes: %d\n", totalVisited)
+	fmt.Printf("Time taken: %v\n", duration)
 
 	if len(allPaths) < maxRecipes {
 		fmt.Printf("Only found %d valid path(s) (requested %d):\n", len(allPaths), maxRecipes)
@@ -457,22 +409,16 @@ func FindMultipleRecipesConcurrent(recipesFile, targetElement string, startingEl
 
 // Create a variation of recipes by shuffling recipe orders
 func createRecipeVariation(recipes []ElementRecipe, seed int) []ElementRecipe {
-	// Create a deep copy of recipes
 	variation := make([]ElementRecipe, len(recipes))
 
-	// Seed the random number generator
 	r := rand.New(rand.NewSource(int64(seed)))
 
-	// Copy and possibly shuffle each recipe's combinations
 	for i, recipe := range recipes {
-		// Make a deep copy of the recipe
 		recipeCopy := ElementRecipe{
 			Element:  recipe.Element,
 			ImageURL: recipe.ImageURL,
 			Tier:     recipe.Tier,
 		}
-
-		// Only shuffle if there are multiple recipes
 		if len(recipe.Recipes) > 1 {
 			// Deep copy recipes
 			recipesCopy := make([][2]string, len(recipe.Recipes))
@@ -496,19 +442,11 @@ func createRecipeVariation(recipes []ElementRecipe, seed int) []ElementRecipe {
 	return variation
 }
 
-// Helper to check if an element is in the list of basic elements
 func isBasicElement(element string, basicElements []string) bool {
-	for _, basic := range basicElements {
-		if basic == element {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(basicElements, element)
 }
 
-// Generate a simple signature for a path
 func generateSimpleSignature(path Path) string {
-	// Sort steps for consistent signature
 	steps := make([]Step, len(path.Steps))
 	copy(steps, path.Steps)
 
@@ -524,23 +462,19 @@ func generateSimpleSignature(path Path) string {
 	return builder.String()
 }
 
-// Helper to get tier of element, defaulting to 0 for basics
 func getTier(element string, tierMap map[string]int) int {
 	if tier, exists := tierMap[element]; exists {
 		return tier
 	}
-	return 0 // Default tier for unknown elements (usually basics)
+	return 0
 }
 
-// Verify that a path follows tier constraints
-// For each step, result tier must be greater than ingredients tier
 func isValidPath(path Path, tierMap map[string]int) bool {
 	for _, step := range path.Steps {
 		resultTier := getTier(step.Result, tierMap)
 		ing1Tier := getTier(step.Ingredients[0], tierMap)
 		ing2Tier := getTier(step.Ingredients[1], tierMap)
 
-		// Strict check: BOTH ingredients must have tier less than result
 		if ing1Tier >= resultTier || ing2Tier >= resultTier {
 			return false
 		}
@@ -558,7 +492,6 @@ func FindSingleRecipeBFS(recipesFile, targetElement string, startingElements []s
 	fmt.Printf("Loaded %d recipes\n", len(recipes))
 	fmt.Printf("Finding path to create: %s\n", targetElement)
 
-	// Cari path + info durasi dan node
 	paths, duration, visited := findPathBFS(recipes, startingElements, targetElement)
 
 	if len(paths) == 0 {
@@ -572,7 +505,6 @@ func FindSingleRecipeBFS(recipesFile, targetElement string, startingElements []s
 		fmt.Printf("%d. %s + %s = %s\n", i+1, step.Ingredients[0], step.Ingredients[1], step.Result)
 	}
 
-	// Tambahan info
 	fmt.Printf("⏱ Time taken to search: %v\n", duration)
 	fmt.Printf("📦 Nodes visited: %d\n", visited)
 
@@ -589,7 +521,6 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 	fmt.Printf("Loaded %d recipes\n", len(recipes))
 	fmt.Printf("Finding up to %d paths to create: %s\n", maxRecipes, targetElement)
 
-	// Build recipe maps for analysis
 	elementMap := make(map[string]ElementRecipe)
 	tierMap := make(map[string]int)
 	for _, recipe := range recipes {
@@ -597,7 +528,6 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 		tierMap[recipe.Element] = recipe.Tier
 	}
 
-	// Get the target recipe
 	targetRecipe, exists := elementMap[targetElement]
 	if !exists {
 		fmt.Printf("Target element '%s' not found in recipes\n", targetElement)
@@ -605,8 +535,6 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 	}
 	targetTier := targetRecipe.Tier
 
-	// Find valid combinations that can create the target
-	// Check tier constraints upfront
 	var validCombinations [][2]string
 	for _, combo := range targetRecipe.Recipes {
 		a, b := combo[0], combo[1]
@@ -623,27 +551,20 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 		return
 	}
 
-	// Find all alternative paths to the ingredients of the target
 	var alternativeIngredientPaths = make(map[string][][2]string)
-	// For each valid combination to make target
 	for _, combo := range validCombinations {
 		ingredient1, ingredient2 := combo[0], combo[1]
-		// For each non-basic ingredient, find its recipes
 		for _, ingredient := range []string{ingredient1, ingredient2} {
-			// Skip if it's a basic element or we already found alternatives
 			if isBasicElement(ingredient, startingElements) || len(alternativeIngredientPaths[ingredient]) > 0 {
 				continue
 			}
-			// Find the recipes for this ingredient
 			if ingRecipe, exists := elementMap[ingredient]; exists {
-				// Add only valid recipes (tier check)
 				var validRecipes [][2]string
 				ingTier := ingRecipe.Tier
 				for _, ingCombo := range ingRecipe.Recipes {
 					a, b := ingCombo[0], ingCombo[1]
 					aTier := getTier(a, tierMap)
 					bTier := getTier(b, tierMap)
-					// Strict check: Both ingredients must have tier less than this ingredient
 					if aTier < ingTier && bTier < ingTier {
 						validRecipes = append(validRecipes, ingCombo)
 					}
@@ -666,7 +587,6 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 	var totalVisited int
 	var maxDuration time.Duration
 
-	// First approach: Use the standard direct approach for first set of paths
 	for _, combo := range validCombinations {
 		mu.Lock()
 		if len(allPaths) >= maxRecipes {
@@ -689,14 +609,10 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 
 			var combinedPaths []Path
 			localVisited := 0
-
-			// For each ingredient
 			for _, ingredient := range combo {
 				if isBasicElement(ingredient, startingElements) {
 					continue
 				}
-
-				// Find path to this ingredient using BFS
 				ingredientPaths, duration, visited := findPathBFS(recipes, startingElements, ingredient)
 				if len(ingredientPaths) > 0 {
 					// Verify the path follows tier constraints
@@ -937,8 +853,8 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 		return
 	}
 
-	fmt.Printf("\n📦 Total visited nodes: %d\n", totalVisited)
-	fmt.Printf("⏱ Time taken: %v\n", maxDuration)
+	fmt.Printf("\n Total visited nodes: %d\n", totalVisited)
+	fmt.Printf("Time taken: %v\n", maxDuration)
 
 	if len(allPaths) < maxRecipes {
 		fmt.Printf("Only found %d valid path(s) (requested %d):\n", len(allPaths), maxRecipes)
