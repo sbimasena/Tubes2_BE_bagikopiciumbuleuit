@@ -308,120 +308,143 @@ func FindSingleRecipeDFS(recipesFile, targetElement string, startingElements []s
 func FindMultipleRecipesDFSConcurrent(recipesFile, targetElement string, startingElements []string, maxRecipes int) ([]Path, int, time.Duration) {
 	recipes, err := LoadRecipes(recipesFile)
 	if err != nil {
-		log.Printf("Error loading recipes: %v", err)
+		log.Fatalf("Error loading recipes: %v", err)
 		return nil, 0, 0
 	}
 
-	elementMap := make(map[string]ElementRecipe)
-	tierMap := make(map[string]int)
-	for _, recipe := range recipes {
-		elementMap[recipe.Element] = recipe
-		tierMap[recipe.Element] = recipe.Tier
+	// Check if target exists
+	found := false
+	for _, r := range recipes {
+		if r.Element == targetElement {
+			found = true
+			break
+		}
 	}
-
-	targetRecipe, exists := elementMap[targetElement]
-	if !exists {
-		log.Printf("Target element '%s' not found in recipes", targetElement)
+	if !found {
+		fmt.Printf("Target element '%s' not found in recipes\n", targetElement)
 		return nil, 0, 0
 	}
-	// targetTier := targetRecipe.Tier
 
-	var validCombinations [][2]string
-	for _, combo := range targetRecipe.Recipes {
-		validCombinations = append(validCombinations, combo) // ✅ biarkan isValidPath yang menyaring
-	}
-	if len(validCombinations) == 0 {
-		log.Printf("No valid recipes found for element '%s'", targetElement)
-		return nil, 0, 0
+	// Create recipe variations
+	variations := make([][]ElementRecipe, maxRecipes*5)
+	variations[0] = make([]ElementRecipe, len(recipes))
+	copy(variations[0], recipes)
+	for i := 1; i < len(variations); i++ {
+		variations[i] = createRecipeVariation(recipes, i)
 	}
 
 	var (
-		ctx            = context.Background()
-		cancelCtx, _   = context.WithCancel(ctx)
-		wg             sync.WaitGroup
-		sem            = make(chan struct{}, 10)
-		mu             sync.Mutex
 		allPaths       []Path
-		pathSignatures = make(map[string]bool)
+		pathSignatures = map[string]bool{}
 		totalVisited   int
+		mu             sync.Mutex
+		wg             sync.WaitGroup
 		startTime      = time.Now()
-		resultChan     = make(chan struct {
-			path    Path
-			visited int
-		}, len(validCombinations))
 	)
 
-	for _, combo := range validCombinations {
-		sem <- struct{}{}
-		wg.Add(1)
+	resultChan := make(chan struct {
+		path    Path
+		visited int
+		varIdx  int
+	}, len(variations))
 
-		go func(combo [2]string) {
+	const maxConcurrent = 5
+	sem := make(chan struct{}, maxConcurrent)
+
+	// Collector goroutine
+	go func() {
+		for result := range resultChan {
+			mu.Lock()
+			sig := generateSignature(result.path)
+			if !pathSignatures[sig] && len(allPaths) < maxRecipes {
+				pathSignatures[sig] = true
+				allPaths = append(allPaths, result.path)
+				totalVisited += result.visited
+			}
+			mu.Unlock()
+		}
+	}()
+
+	for varIdx, recipeVariation := range variations {
+		mu.Lock()
+		if len(allPaths) >= maxRecipes {
+			mu.Unlock()
+			break
+		}
+		mu.Unlock()
+
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(recipes []ElementRecipe, idx int) {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			var combinedSteps []Step
-			visitedSet := make(map[[3]string]bool)
-			localVisited := 0
-
-			for _, ingredient := range combo {
-				if isBasicElement(ingredient, startingElements) {
-					continue
-				}
-				paths, _, visited := findPathDFS(recipes, startingElements, ingredient)
-				if len(paths) == 0 {
-					return
-				}
-				localVisited += visited
-				for _, s := range paths[0].Steps {
-					key := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
-					if !visitedSet[key] {
-						visitedSet[key] = true
-						combinedSteps = append(combinedSteps, s)
-					}
-				}
-			}
-
-			finalStep := Step{Ingredients: combo, Result: targetElement}
-			key := [3]string{combo[0], combo[1], targetElement}
-			if !visitedSet[key] {
-				combinedSteps = append(combinedSteps, finalStep)
-			}
-
-			path := Path{Steps: combinedSteps, FinalItem: targetElement}
-
-			resultChan <- struct {
-				path    Path
+			type localResult struct {
+				paths   []Path
 				visited int
-			}{path, localVisited}
-		}(combo)
-	}
-
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	for result := range resultChan {
-		mu.Lock()
-		sig := generateSimpleSignature(result.path)
-		if !pathSignatures[sig] && len(allPaths) < maxRecipes {
-			pathSignatures[sig] = true
-			allPaths = append(allPaths, result.path)
-			totalVisited += result.visited
-			if len(allPaths) >= maxRecipes {
-				cancelCtx.Done()
 			}
-		}
-		mu.Unlock()
+
+			innerChan := make(chan localResult, 1)
+			go func() {
+				paths, _, visited := findPathDFS(recipes, startingElements, targetElement)
+				innerChan <- localResult{paths, visited}
+			}()
+
+			result := <-innerChan
+			if len(result.paths) > 0 {
+				resultChan <- struct {
+					path    Path
+					visited int
+					varIdx  int
+				}{result.paths[0], result.visited, idx}
+			}
+		}(recipeVariation, varIdx)
 	}
 
-	duration := time.Since(startTime)
+	wg.Wait()
+	close(resultChan)
 
 	sort.Slice(allPaths, func(i, j int) bool {
 		return len(allPaths[i].Steps) < len(allPaths[j].Steps)
 	})
 
+	duration := time.Since(startTime)
+
 	return allPaths, totalVisited, duration
+}
+
+func createRecipeVariation(recipes []ElementRecipe, seed int) []ElementRecipe {
+	variation := make([]ElementRecipe, len(recipes))
+
+	r := rand.New(rand.NewSource(int64(seed)))
+
+	for i, recipe := range recipes {
+		recipeCopy := ElementRecipe{
+			Element:  recipe.Element,
+			ImageURL: recipe.ImageURL,
+			Tier:     recipe.Tier,
+		}
+		if len(recipe.Recipes) > 1 {
+			// Deep copy recipes
+			recipesCopy := make([][2]string, len(recipe.Recipes))
+			copy(recipesCopy, recipe.Recipes)
+
+			// Shuffle the recipes
+			r.Shuffle(len(recipesCopy), func(i, j int) {
+				recipesCopy[i], recipesCopy[j] = recipesCopy[j], recipesCopy[i]
+			})
+
+			recipeCopy.Recipes = recipesCopy
+		} else {
+			// Just copy without shuffling
+			recipeCopy.Recipes = make([][2]string, len(recipe.Recipes))
+			copy(recipeCopy.Recipes, recipe.Recipes)
+		}
+
+		variation[i] = recipeCopy
+	}
+
+	return variation
 }
 
 func isBasicElement(element string, basicElements []string) bool {
@@ -496,7 +519,7 @@ func FindSingleRecipeBFS(recipesFile, targetElement string, startingElements []s
 func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startingElements []string, maxRecipes int) ([]Path, int, time.Duration) {
 	recipes, err := LoadRecipes(recipesFile)
 	if err != nil {
-		log.Printf("Error loading recipes: %v", err)
+		log.Fatalf("Error loading recipes: %v", err)
 		return nil, 0, 0
 	}
 
@@ -509,32 +532,62 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 
 	targetRecipe, exists := elementMap[targetElement]
 	if !exists {
-		log.Printf("Target element '%s' not found in recipes", targetElement)
+		fmt.Printf("Target element '%s' not found in recipes\n", targetElement)
 		return nil, 0, 0
 	}
-	// targetTier := targetRecipe.Tier
 
+	targetTier := targetRecipe.Tier
 	var validCombinations [][2]string
 	for _, combo := range targetRecipe.Recipes {
-		validCombinations = append(validCombinations, combo)
+		a, b := combo[0], combo[1]
+		aTier := getTier(a, tierMap)
+		bTier := getTier(b, tierMap)
+		// Strict check: Both ingredients must have tier less than target
+		if aTier < targetTier && bTier < targetTier {
+			validCombinations = append(validCombinations, combo)
+		}
 	}
+
 	if len(validCombinations) == 0 {
-		log.Printf("No valid recipes found for element '%s'", targetElement)
+		fmt.Printf("No valid recipes found for element '%s'\n", targetElement)
 		return nil, 0, 0
 	}
 
+	var alternativeIngredientPaths = make(map[string][][2]string)
+	for _, combo := range validCombinations {
+		ingredient1, ingredient2 := combo[0], combo[1]
+		for _, ingredient := range []string{ingredient1, ingredient2} {
+			if isBasicElement(ingredient, startingElements) || len(alternativeIngredientPaths[ingredient]) > 0 {
+				continue
+			}
+			if ingRecipe, exists := elementMap[ingredient]; exists {
+				var validRecipes [][2]string
+				ingTier := ingRecipe.Tier
+				for _, ingCombo := range ingRecipe.Recipes {
+					a, b := ingCombo[0], ingCombo[1]
+					aTier := getTier(a, tierMap)
+					bTier := getTier(b, tierMap)
+					if aTier < ingTier && bTier < ingTier {
+						validRecipes = append(validRecipes, ingCombo)
+					}
+				}
+				alternativeIngredientPaths[ingredient] = validRecipes
+			}
+		}
+	}
+
+	// Synchronization primitives
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	sem := make(chan struct{}, 10)
 
-	var (
-		wg             sync.WaitGroup
-		mu             sync.Mutex
-		sem            = make(chan struct{}, 10)
-		allPaths       []Path
-		totalVisited   int
-		startTime      = time.Now()
-		pathSignatures = make(map[string]bool)
-	)
+	// Results
+	var allPaths []Path
+	var pathSignatures = make(map[string]bool)
+	var totalVisited int
+	var maxDuration time.Duration
 
 	for _, combo := range validCombinations {
 		mu.Lock()
@@ -546,7 +599,6 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 
 		sem <- struct{}{}
 		wg.Add(1)
-
 		go func(combo [2]string) {
 			defer wg.Done()
 			defer func() { <-sem }()
@@ -564,14 +616,27 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 				if isBasicElement(ingredient, startingElements) {
 					continue
 				}
-				paths, _, visited := findPathBFS(recipes, startingElements, ingredient)
-				if len(paths) == 0 || !isValidPath(paths[0], tierMap) {
+
+				ingredientPaths, duration, visited := findPathBFS(recipes, startingElements, ingredient)
+				if len(ingredientPaths) > 0 {
+					// Verify the path follows tier constraints
+					if isValidPath(ingredientPaths[0], tierMap) {
+						combinedPaths = append(combinedPaths, ingredientPaths[0])
+						localVisited += visited
+						mu.Lock()
+						if duration > maxDuration {
+							maxDuration = duration
+						}
+						mu.Unlock()
+					} else {
+						return
+					}
+				} else {
 					return
 				}
-				combinedPaths = append(combinedPaths, paths[0])
-				localVisited += visited
 			}
 
+			// Combine steps without duplicates
 			stepSet := make(map[[3]string]bool)
 			var steps []Step
 			for _, path := range combinedPaths {
@@ -584,40 +649,220 @@ func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startin
 				}
 			}
 
+			// Add final step
 			finalStep := Step{Ingredients: combo, Result: targetElement}
 			key := [3]string{combo[0], combo[1], targetElement}
 			if !stepSet[key] {
+				stepSet[key] = true
 				steps = append(steps, finalStep)
 			}
 
-			finalPath := Path{Steps: steps, FinalItem: targetElement}
-			if !isValidPath(finalPath, tierMap) {
-				return
+			finalPath := Path{
+				Steps:     steps,
+				FinalItem: targetElement,
 			}
 
-			signature := generateSimpleSignature(finalPath)
-
-			mu.Lock()
-			if !pathSignatures[signature] && len(allPaths) < maxRecipes {
-				pathSignatures[signature] = true
-				allPaths = append(allPaths, finalPath)
+			// Final check: ensure the whole path is valid
+			if isValidPath(finalPath, tierMap) {
+				signature := generateSimpleSignature(finalPath)
+				mu.Lock()
 				totalVisited += localVisited
-				if len(allPaths) >= maxRecipes {
-					cancel()
+				if !pathSignatures[signature] && len(allPaths) < maxRecipes {
+					pathSignatures[signature] = true
+					allPaths = append(allPaths, finalPath)
+					if len(allPaths) >= maxRecipes {
+						cancel()
+					}
 				}
+				mu.Unlock()
 			}
-			mu.Unlock()
 		}(combo)
 	}
 
-	wg.Wait()
-	duration := time.Since(startTime)
+	// Second approach: Use alternative paths for ingredients
+	for _, combo := range validCombinations {
+		mu.Lock()
+		if len(allPaths) >= maxRecipes {
+			mu.Unlock()
+			break
+		}
+		mu.Unlock()
 
+		// For each ingredient in the combo
+		for ingIndex, ingredient := range combo {
+			// Skip basic elements
+			if isBasicElement(ingredient, startingElements) {
+				continue
+			}
+
+			// Get alternative ways to create this ingredient
+			alternatives := alternativeIngredientPaths[ingredient]
+			if len(alternatives) == 0 {
+				continue
+			}
+
+			// Try each alternative recipe for this ingredient
+			for _, altCombo := range alternatives {
+				mu.Lock()
+				if len(allPaths) >= maxRecipes {
+					mu.Unlock()
+					break
+				}
+				mu.Unlock()
+
+				sem <- struct{}{}
+				wg.Add(1)
+				go func(targetCombo [2]string, ingIndex int, ingredient string, altCombo [2]string) {
+					defer wg.Done()
+					defer func() { <-sem }()
+
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+
+					// Step 1: Find paths for both ingredients of the alternative combo
+					var altIngredientPaths []Path
+					localVisited := 0
+
+					for _, altIng := range altCombo {
+						if isBasicElement(altIng, startingElements) {
+							continue
+						}
+
+						paths, duration, visited := findPathBFS(recipes, startingElements, altIng)
+						if len(paths) > 0 {
+							// Verify path follows tier constraints
+							if isValidPath(paths[0], tierMap) {
+								altIngredientPaths = append(altIngredientPaths, paths[0])
+								localVisited += visited
+								mu.Lock()
+								if duration > maxDuration {
+									maxDuration = duration
+								}
+								mu.Unlock()
+							} else {
+								return
+							}
+						} else {
+							return
+						}
+					}
+
+					// Step 2: Find path for the other ingredient in the target combo
+					var otherIngredientPath []Path
+					otherIngredient := targetCombo[1-ingIndex]
+
+					if !isBasicElement(otherIngredient, startingElements) {
+						paths, duration, visited := findPathBFS(recipes, startingElements, otherIngredient)
+						if len(paths) > 0 {
+							// Verify path follows tier constraints
+							if isValidPath(paths[0], tierMap) {
+								otherIngredientPath = append(otherIngredientPath, paths[0])
+								localVisited += visited
+								mu.Lock()
+								if duration > maxDuration {
+									maxDuration = duration
+								}
+								mu.Unlock()
+							} else {
+								return
+							}
+						} else {
+							return
+						}
+					}
+
+					// Step 3: Combine all steps
+					stepSet := make(map[[3]string]bool)
+					var steps []Step
+
+					// Add steps for alternative ingredients
+					for _, path := range altIngredientPaths {
+						for _, s := range path.Steps {
+							key := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
+							if !stepSet[key] {
+								stepSet[key] = true
+								steps = append(steps, s)
+							}
+						}
+					}
+
+					// Add step to create the ingredient using alternative
+					// Verify tier constraints for this step
+					ingTier := getTier(ingredient, tierMap)
+					alt1Tier := getTier(altCombo[0], tierMap)
+					alt2Tier := getTier(altCombo[1], tierMap)
+
+					if alt1Tier < ingTier && alt2Tier < ingTier {
+						ingredientStep := Step{Ingredients: altCombo, Result: ingredient}
+						ingredientKey := [3]string{altCombo[0], altCombo[1], ingredient}
+						if !stepSet[ingredientKey] {
+							stepSet[ingredientKey] = true
+							steps = append(steps, ingredientStep)
+						}
+					} else {
+						return
+					}
+
+					// Add steps for other ingredient
+					for _, path := range otherIngredientPath {
+						for _, s := range path.Steps {
+							key := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
+							if !stepSet[key] {
+								stepSet[key] = true
+								steps = append(steps, s)
+							}
+						}
+					}
+
+					// Add final step to create target
+					// Tier check for final step was already done when building validCombinations
+					finalStep := Step{Ingredients: targetCombo, Result: targetElement}
+					finalKey := [3]string{targetCombo[0], targetCombo[1], targetElement}
+					if !stepSet[finalKey] {
+						stepSet[finalKey] = true
+						steps = append(steps, finalStep)
+					}
+
+					// Create final path
+					finalPath := Path{
+						Steps:     steps,
+						FinalItem: targetElement,
+					}
+
+					// Final check: ensure the whole path is valid
+					if isValidPath(finalPath, tierMap) {
+						signature := generateSimpleSignature(finalPath)
+						mu.Lock()
+						totalVisited += localVisited
+						if !pathSignatures[signature] && len(allPaths) < maxRecipes {
+							pathSignatures[signature] = true
+							allPaths = append(allPaths, finalPath)
+							if len(allPaths) >= maxRecipes {
+								cancel()
+							}
+						}
+						mu.Unlock()
+					}
+				}(combo, ingIndex, ingredient, altCombo)
+			}
+		}
+	}
+
+	wg.Wait()
+
+	// Sort paths by number of steps (shortest first)
 	sort.Slice(allPaths, func(i, j int) bool {
 		return len(allPaths[i].Steps) < len(allPaths[j].Steps)
 	})
 
-	return allPaths, totalVisited, duration
+	if len(allPaths) == 0 {
+		return nil, totalVisited, maxDuration
+	}
+
+	return allPaths, totalVisited, maxDuration
 }
 
 func shuffleRecipes(elements map[string][][]string, seed int) {
