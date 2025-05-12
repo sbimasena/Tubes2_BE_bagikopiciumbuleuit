@@ -1,0 +1,12 @@
+services:
+  backend:
+    build: .
+    container_name: go-backend
+    ports:
+      - "8080:8080"
+    networks:
+      - kejucraft-net
+
+networks:
+  kejucraft-net: # custom network, tergantung nanti mau deploy gimana.
+    external: true

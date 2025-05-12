@@ -5,17 +5,17 @@ import (
 )
 
 type BFSNode struct {
-	Remaining []string           // Elements still to be resolved
-	Steps     []Step             // Steps collected so far
-	Visited   map[string]bool    // Track visited elements in this path
-	StepSet   map[[3]string]bool // Deduplicate steps by ingredients and result
+	Remaining []string
+	Steps     []Step
+	Visited   map[string]bool
+	StepSet   map[[3]string]bool
+	Defined   map[string][2]string // NEW: Track definitions per element
 }
 
 func findPathBFS(recipes []ElementRecipe, startElements []string, target string) ([]Path, time.Duration, int) {
 	startTime := time.Now()
-	iterations := 0
 
-	// Build lookup maps
+	// Lookup maps
 	tierMap := make(map[string]int)
 	recipeMap := make(map[string][][2]string)
 
@@ -25,20 +25,18 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 		for _, combo := range recipe.Recipes {
 			for _, ing := range combo {
 				if _, exists := tierMap[ing]; !exists {
-					tierMap[ing] = 1 // default for undefined tier
+					tierMap[ing] = 1
 				}
 			}
 		}
 	}
 
-	// Set tier for basic elements
 	for _, elem := range startElements {
 		if _, exists := tierMap[elem]; !exists {
 			tierMap[elem] = 1
 		}
 	}
 
-	// Identify basic elements
 	basics := make(map[string]bool)
 	for _, e := range startElements {
 		basics[e] = true
@@ -52,6 +50,7 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 			Steps:     []Step{},
 			Visited:   make(map[string]bool),
 			StepSet:   make(map[[3]string]bool),
+			Defined:   make(map[string][2]string), // NEW
 		},
 	}
 
@@ -59,7 +58,6 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 		curr := queue[0]
 		queue = queue[1:]
 
-		// First, check if all elements in `Remaining` are basic
 		allBasic := true
 		var elemToExpand string
 
@@ -71,7 +69,6 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 			}
 		}
 
-		// fmt.Printf("Exploring: %v, Steps: %d\n", curr.Remaining, len(curr.Steps))
 		if allBasic {
 			reversedSteps := make([]Step, len(curr.Steps))
 			for i, step := range curr.Steps {
@@ -80,10 +77,9 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 			return []Path{{
 				Steps:     reversedSteps,
 				FinalItem: target,
-			}}, time.Since(startTime), iterations
+			}}, time.Since(startTime), len(visitedCounter)
 		}
 
-		// Skip cycles
 		if curr.Visited[elemToExpand] {
 			newRemaining := removeElement(curr.Remaining, elemToExpand)
 			queue = append(queue, BFSNode{
@@ -91,6 +87,7 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 				Steps:     curr.Steps,
 				Visited:   curr.Visited,
 				StepSet:   curr.StepSet,
+				Defined:   curr.Defined,
 			})
 			continue
 		}
@@ -104,10 +101,8 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 		}
 
 		for _, combo := range combos {
-			iterations++
 			a, b := combo[0], combo[1]
 
-			// Check tier constraint
 			aTier, aOk := tierMap[a]
 			bTier, bOk := tierMap[b]
 			resultTier := tierMap[elemToExpand]
@@ -122,20 +117,29 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 				continue
 			}
 
-			// Make a new step
+			if defCombo, ok := curr.Defined[elemToExpand]; ok {
+				if defCombo != combo {
+					continue // Conflict in definition
+				}
+			}
+
 			step := Step{Ingredients: [2]string{a, b}, Result: elemToExpand}
 			stepKey := [3]string{a, b, elemToExpand}
 
 			newSteps := make([]Step, len(curr.Steps))
 			copy(newSteps, curr.Steps)
 			newStepSet := copyStepSet(curr.StepSet)
+			newDefined := copyDefinedMap(curr.Defined)
+
+			if _, alreadyDefined := curr.Defined[elemToExpand]; !alreadyDefined {
+				newDefined[elemToExpand] = combo
+			}
 
 			if !newStepSet[stepKey] {
 				newSteps = append(newSteps, step)
 				newStepSet[stepKey] = true
 			}
 
-			// New Remaining list: replace elemToExpand with [a, b], drop already basic ones
 			newRemaining := []string{}
 			for _, r := range curr.Remaining {
 				if r == elemToExpand {
@@ -155,11 +159,12 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 				Steps:     newSteps,
 				Visited:   newVisited,
 				StepSet:   newStepSet,
+				Defined:   newDefined, // NEW
 			})
 		}
 	}
 
-	return nil, time.Since(startTime), iterations
+	return nil, time.Since(startTime), len(visitedCounter)
 }
 
 // Helper function to create a deep copy of the visited map
@@ -188,4 +193,12 @@ func removeElement(slice []string, element string) []string {
 		}
 	}
 	return newSlice
+}
+
+func copyDefinedMap(original map[string][2]string) map[string][2]string {
+	newMap := make(map[string][2]string)
+	for k, v := range original {
+		newMap[k] = v
+	}
+	return newMap
 }
