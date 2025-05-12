@@ -3,7 +3,7 @@ package main
 import (
 	"alchemy/recipe"
 	"encoding/json"
-	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -21,35 +21,35 @@ import (
 
 // func main() {
 // 	reader := bufio.NewReader(os.Stdin)
-// 	fmt.Print("Scraping atau tidak? (y/n): ")
+// 	log.Print("Scraping atau tidak? (y/n): ")
 // 	scrape, _ := reader.ReadString('\n')
 // 	scrape = strings.TrimSpace(strings.ToLower(scrape))
 // 	if scrape == "y" {
-// 		fmt.Println("Melakukan scraping...")
+// 		log.Println("Melakukan scraping...")
 // 		mainScrap()
 // 	}
-// 	fmt.Print("Pilih algoritma utama (bfs/dfs/bidirectional): ")
+// 	log.Print("Pilih algoritma utama (bfs/dfs/bidirectional): ")
 // 	mainAlg, _ := reader.ReadString('\n')
 // 	mainAlg = strings.TrimSpace(strings.ToLower(mainAlg))
 
 // 	var bidiAlg string
 // 	if mainAlg == "bidirectional" {
-// 		fmt.Print("Pilih metode bidirectional (bfs/dfs): ")
+// 		log.Print("Pilih metode bidirectional (bfs/dfs): ")
 // 		bidiAlgRaw, _ := reader.ReadString('\n')
 // 		bidiAlg = strings.TrimSpace(strings.ToLower(bidiAlgRaw))
 // 		if bidiAlg != "bfs" && bidiAlg != "dfs" {
-// 			fmt.Println("Metode bidirectional tidak valid, gunakan bfs atau dfs.")
+// 			log.Println("Metode bidirectional tidak valid, gunakan bfs atau dfs.")
 // 			return
 // 		}
 // 	}
 
-// 	fmt.Print("Ingin mencari satu resep atau banyak? (1/multiple): ")
+// 	log.Print("Ingin mencari satu resep atau banyak? (1/multiple): ")
 // 	mode, _ := reader.ReadString('\n')
 // 	mode = strings.TrimSpace(strings.ToLower(mode))
 
 // 	maxPaths := 1
 // 	if mode == "multiple" {
-// 		fmt.Print("Berapa jumlah maksimum resep yang ingin dicari? ")
+// 		log.Print("Berapa jumlah maksimum resep yang ingin dicari? ")
 // 		input, _ := reader.ReadString('\n')
 // 		input = strings.TrimSpace(input)
 // 		val, err := strconv.Atoi(input)
@@ -60,21 +60,21 @@ import (
 
 // 	elements, err := recipe.LoadElements("recipes.json")
 // 	if err != nil {
-// 		fmt.Println("Gagal membaca file recipes.json:", err)
+// 		log.Println("Gagal membaca file recipes.json:", err)
 // 		return
 // 	}
 
-// 	fmt.Print("Masukkan nama elemen target: ")
+// 	log.Print("Masukkan nama elemen target: ")
 // 	target, _ := reader.ReadString('\n')
 // 	target = strings.TrimSpace(target)
 
 // 	if target == "" || target == " " || target == "\n" {
-// 		fmt.Println("Nama elemen target tidak boleh kosong.")
+// 		log.Println("Nama elemen target tidak boleh kosong.")
 // 		return
 // 	}
 
 // 	if !isElementInRecipes(target, elements) {
-// 		fmt.Println("Elemen target tidak ditemukan dalam database.")
+// 		log.Println("Elemen target tidak ditemukan dalam database.")
 // 		return
 // 	}
 
@@ -103,8 +103,8 @@ import (
 // 				if path != nil {
 // 					paths = append(paths, path)
 // 					steps = append(steps, step)
-// 					fmt.Println("\nTotal simpul yang dieksplorasi:", visited)
-// 					fmt.Println("Waktu eksekusi:", dur)
+// 					log.Println("\nTotal simpul yang dieksplorasi:", visited)
+// 					log.Println("Waktu eksekusi:", dur)
 // 				}
 // 			}
 // 		} else {
@@ -115,8 +115,8 @@ import (
 // 				if path != nil {
 // 					paths = append(paths, path)
 // 					steps = append(steps, step)
-// 					fmt.Println("\nTotal simpul yang dieksplorasi:", visited)
-// 					fmt.Println("Waktu eksekusi:", dur)
+// 					log.Println("\nTotal simpul yang dieksplorasi:", visited)
+// 					log.Println("Waktu eksekusi:", dur)
 // 				}
 // 			}
 // 		}
@@ -129,12 +129,12 @@ import (
 // 		}
 // 	}
 
-// 	fmt.Println("\nHasil:")
-// 	fmt.Printf("Ditemukan %d jalur resep.\n", len(paths))
+// 	log.Println("\nHasil:")
+// 	log.Printf("Ditemukan %d jalur resep.\n", len(paths))
 
 // 	for i := range paths {
 // 		stepMap := steps[i]
-// 		fmt.Printf("\nResep ke-%d:\n", i+1)
+// 		log.Printf("\nResep ke-%d:\n", i+1)
 // 		counter := 1
 // 		printed := make(map[string]bool)
 
@@ -149,7 +149,7 @@ import (
 // 			}
 // 			printSteps(ing[0])
 // 			printSteps(ing[1])
-// 			fmt.Printf("%d. %s + %s = %s\n", counter, ing[0], ing[1], res)
+// 			log.Printf("%d. %s + %s = %s\n", counter, ing[0], ing[1], res)
 // 			counter++
 // 			printed[res] = true
 // 		}
@@ -211,7 +211,6 @@ func main() {
 					http.Error(w, "No path found", http.StatusNotFound)
 					return
 				}
-				fmt.Printf("DEBUG: total %d paths returned\n", len(paths))
 
 				var converted [][]string
 				var stepsList []map[string][]string
@@ -351,7 +350,7 @@ func main() {
 			return
 		}
 
-		fmt.Println("Scraping triggered via API...")
+		log.Println("Scraping triggered via API...")
 		if err := mainScrap(); err != nil {
 			http.Error(w, "Scraping failed: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -361,13 +360,57 @@ func main() {
 		w.Write([]byte("Scraping completed successfully"))
 	})
 
-	fmt.Println("🌐 Server running at http://localhost:8080")
+	mux.HandleFunc("/api/elements", func(w http.ResponseWriter, r *http.Request) {
+		elements, err := recipe.LoadElements("recipes.json")
+		if err != nil {
+			http.Error(w, "Failed to load elements", http.StatusInternalServerError)
+			return
+		}
+
+		type ElementImage struct {
+			Element  string `json:"element"`
+			ImageURL string `json:"image_url"`
+		}
+
+		var result []ElementImage
+		for _, e := range elements {
+			result = append(result, ElementImage{
+				Element:  e.Element,
+				ImageURL: e.ImageURL,
+			})
+		}
+
+		writeJSON(w, result)
+	})
+
+	mux.HandleFunc("/api/image", func(w http.ResponseWriter, r *http.Request) {
+		url := r.URL.Query().Get("url")
+		if url == "" {
+			http.Error(w, "Missing image URL", http.StatusBadRequest)
+			return
+		}
+
+		resp, err := http.Get(url)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			http.Error(w, "Failed to fetch image", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+		io.Copy(w, resp.Body)
+	})
+
+	log.Println("🌐 Server running at http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", withCORS(mux)))
 }
 
 func writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	err := json.NewEncoder(w).Encode(data)
+	if err != nil {
+		http.Error(w, "Failed to encode JSON", http.StatusInternalServerError)
+	}
 }
 
 func withCORS(next http.Handler) http.Handler {
