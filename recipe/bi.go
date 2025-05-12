@@ -3,7 +3,6 @@ package recipe
 import (
 	"container/list"
 	"fmt"
-	"maps"
 	"time"
 )
 
@@ -14,14 +13,13 @@ type BiState struct {
 	AvailableElems map[string]bool
 }
 
-// Helper function to check if an element is valid
 func isValidElement(element string, elements map[string][][]string, tiers map[string]int) bool {
-	// 1. Harus punya info tier
+	// Harus punya info tier
 	if _, hasTier := tiers[element]; !hasTier {
 		return false
 	}
 
-	// 2. Harus muncul sebagai hasil (elements map) atau bahan dalam recipe
+	// Harus muncul sebagai hasil (elements map) atau bahan dalam recipe
 	if _, isResult := elements[element]; isResult {
 		return true
 	}
@@ -29,342 +27,206 @@ func isValidElement(element string, elements map[string][][]string, tiers map[st
 	return false
 }
 
-// Implementasi BFS Bidirectional dengan constraint tier dan return time duration
 func BiSearchBFS(target string, elements map[string][][]string, basicElements map[string]bool, tiers map[string]int) ([]string, map[string][]string, int, time.Duration) {
-	// Catat waktu mulai
 	startTime := time.Now()
-
-	// Struktur data untuk BFS
-	forwardQueue := list.New()
-	backwardQueue := list.New()
-	forwardVisited := make(map[string]BiState)
-	backwardVisited := make(map[string]BiState)
 	nodesExplored := 0
 
-	// Inisialisasi pencarian maju
-	for element := range basicElements {
-		availableElems := make(map[string]bool)
-		for e := range basicElements {
-			availableElems[e] = true
-		}
+	// forward queue (dari basic element)
+	forwardQueue := list.New()
+	forwardParent := make(map[string]string)   // element -> its immediate parent
+	forwardRecipe := make(map[string][]string) // element -> ingredients used to create it
+	forwardVisited := make(map[string]bool)
 
-		state := BiState{
-			Element:        element,
-			Path:           []string{element},
-			PathSteps:      make(map[string][]string),
-			AvailableElems: availableElems,
-		}
+	// forward queue (dari target element)
+	backwardQueue := list.New()
+	backwardParent := make(map[string]string)       // element -> one of its possible results
+	backwardIngredient := make(map[string][]string) // element -> the pair of ingredients it's part of
+	backwardVisited := make(map[string]bool)
 
-		forwardQueue.PushBack(state)
-		forwardVisited[element] = state
+	for elem := range basicElements {
+		forwardQueue.PushBack(elem)
+		forwardVisited[elem] = true
 	}
 
-	// Inisialisasi pencarian mundur
-	backwardState := BiState{
-		Element:        target,
-		Path:           []string{target},
-		PathSteps:      make(map[string][]string),
-		AvailableElems: map[string]bool{target: true},
-	}
-	backwardQueue.PushBack(backwardState)
-	backwardVisited[target] = backwardState
+	backwardQueue.PushBack(target)
+	backwardVisited[target] = true
 
-	// Loop utama BFS
+	meetingPoints := make(map[string]bool)
+
+	// Alternating BFS
 	for forwardQueue.Len() > 0 && backwardQueue.Len() > 0 {
-		// Forward BFS
-		size := forwardQueue.Len()
-		for i := 0; i < size; i++ {
-			current := forwardQueue.Remove(forwardQueue.Front()).(BiState)
+		levelSize := forwardQueue.Len()
+		for i := 0; i < levelSize; i++ {
+			current := forwardQueue.Remove(forwardQueue.Front()).(string)
 			nodesExplored++
 
-			// Cek pertemuan
-			if bwState, ok := backwardVisited[current.Element]; ok {
-
-				// Gabungkan steps
-				allSteps := make(map[string][]string)
-				for k, v := range current.PathSteps {
-					allSteps[k] = v
-				}
-				for k, v := range bwState.PathSteps {
-					allSteps[k] = v
-				}
-
-				// Rekonstruksi jalur secara iteratif
-				path := reconstructPathIterative(target, allSteps, basicElements, elements, tiers)
-				if path != nil {
-					return path, allSteps, nodesExplored, time.Since(startTime)
-				}
+			// cek kalo udh ketemu
+			if backwardVisited[current] {
+				meetingPoints[current] = true
 			}
 
-			// Coba buat elemen baru
-			for resultElem, recipes := range elements {
-				// Skip jika sudah dikunjungi
-				if !isValidElement(resultElem, elements, tiers) {
+			// coba craft dr basic element dan yg udh dipunya
+			for result, recipes := range elements {
+				if forwardVisited[result] {
 					continue
 				}
 
-				// Dapatkan tier dari elemen hasil
-				resultTier, hasTier := tiers[resultElem]
+				resultTier, hasTier := tiers[result]
 				if !hasTier {
-					// Skip jika tidak punya tier info
 					continue
 				}
 
-				// Coba setiap resep
+				// loop utk cari variasi resep dari current element
 				for _, recipe := range recipes {
 					if len(recipe) != 2 {
 						continue
 					}
 
-					ing1 := recipe[0]
-					ing2 := recipe[1]
-					if !isValidElement(ing1, elements, tiers) || !isValidElement(ing2, elements, tiers) {
-						continue
-					}
-
-					// Dapatkan tier dari bahan-bahan
+					ing1, ing2 := recipe[0], recipe[1]
 					ing1Tier, hasIng1Tier := tiers[ing1]
 					ing2Tier, hasIng2Tier := tiers[ing2]
 
-					// Skip jika tidak punya tier info
-					if !hasIng1Tier || !hasIng2Tier {
+					if !hasIng1Tier || !hasIng2Tier || ing1Tier >= resultTier || ing2Tier >= resultTier {
 						continue
 					}
 
-					// Constraint tier: bahan harus tier lebih rendah dari hasil
-					if ing1Tier >= resultTier || ing2Tier >= resultTier {
-						continue
-					}
+					// cek ingredients udah pernah divisit blm
+					if forwardVisited[ing1] && forwardVisited[ing2] && !forwardVisited[result] {
+						forwardVisited[result] = true
+						forwardParent[result] = current
+						forwardRecipe[result] = []string{ing1, ing2}
+						forwardQueue.PushBack(result)
 
-					// Cek apakah kedua bahan tersedia
-					ing1Available := current.AvailableElems[ing1] || current.Element == ing1
-					ing2Available := current.AvailableElems[ing2] || current.Element == ing2
-
-					if ing1Available && ing2Available {
-						// Buat state baru
-						newAvailable := make(map[string]bool)
-						for k, v := range current.AvailableElems {
-							newAvailable[k] = v
-						}
-						newAvailable[resultElem] = true
-
-						newPath := make([]string, len(current.Path))
-						copy(newPath, current.Path)
-						newPath = append(newPath, resultElem)
-
-						newSteps := make(map[string][]string)
-						for k, v := range current.PathSteps {
-							newSteps[k] = make([]string, len(v))
-							copy(newSteps[k], v)
-						}
-						newSteps[resultElem] = []string{ing1, ing2}
-
-						// Buat state baru
-						newState := BiState{
-							Element:        resultElem,
-							Path:           newPath,
-							PathSteps:      newSteps,
-							AvailableElems: newAvailable,
+						if backwardVisited[result] {
+							meetingPoints[result] = true
 						}
 
-						// Tambahkan ke queue dan visited
-						forwardQueue.PushBack(newState)
-						forwardVisited[resultElem] = newState
-
-						// Cek apakah ini target
-						if resultElem == target {
-
-							// Buat jalur final
-							finalPath := filterBasicElements(newPath, basicElements)
-							return finalPath, newSteps, nodesExplored, time.Since(startTime)
-						}
-
-						// Cek pertemuan
-						if _, ok := backwardVisited[resultElem]; ok {
-
-							// Gabungkan steps
-							allSteps := make(map[string][]string)
-							for k, v := range newSteps {
-								allSteps[k] = v
-							}
-							for k, v := range backwardVisited[resultElem].PathSteps {
-								allSteps[k] = v
-							}
-
-							// Rekonstruksi jalur
-							path := reconstructPathIterative(target, allSteps, basicElements, elements, tiers)
-							if path != nil {
-								return path, allSteps, nodesExplored, time.Since(startTime)
-							}
+						if result == target {
+							meetingPoints[result] = true
+							break
 						}
 					}
+
 				}
 			}
 		}
 
-		// Backward BFS
-		size = backwardQueue.Len()
-		for i := 0; i < size; i++ {
-			current := backwardQueue.Remove(backwardQueue.Front()).(BiState)
-			nodesExplored++
+		// kalau udh ada yg ketemu
+		if len(meetingPoints) > 0 {
 
-			// Dapatkan tier dari elemen saat ini
-			currentTier, hasTier := tiers[current.Element]
-			if !hasTier {
-				// Skip jika tidak punya tier info
-				continue
+			allSteps := make(map[string][]string)
+
+			for elem, recipe := range forwardRecipe {
+				allSteps[elem] = recipe
 			}
 
-			// Cek pertemuan
-			if fwState, ok := forwardVisited[current.Element]; ok {
-
-				// Gabungkan steps
-				allSteps := make(map[string][]string)
-				for k, v := range fwState.PathSteps {
-					allSteps[k] = v
+			for elem, ingredients := range backwardIngredient {
+				parent := backwardParent[elem]
+				if parent != "" && !basicElements[elem] {
+					allSteps[parent] = ingredients
 				}
-				for k, v := range current.PathSteps {
-					allSteps[k] = v
+			}
+
+			// reconstruct a path
+			for meetingPoint := range meetingPoints {
+				// kalo meeting point nya dr bw
+				if recipe, ok := backwardIngredient[meetingPoint]; ok && meetingPoint != target {
+					allSteps[meetingPoint] = recipe
 				}
 
-				// Rekonstruksi jalur
-				path := reconstructPathIterative(target, allSteps, basicElements, elements, tiers)
+				path := reconstructPath(target, allSteps, basicElements, elements, tiers)
 				if path != nil {
 					return path, allSteps, nodesExplored, time.Since(startTime)
 				}
 			}
+		}
 
-			// Cari resep yang menghasilkan elemen ini
-			recipes, hasRecipes := elements[current.Element]
-			if !hasRecipes {
+		levelSize = backwardQueue.Len()
+		for i := 0; i < levelSize; i++ {
+			current := backwardQueue.Remove(backwardQueue.Front()).(string)
+			nodesExplored++
+
+			if forwardVisited[current] {
+				meetingPoints[current] = true
+			}
+
+			if basicElements[current] {
+				meetingPoints[current] = true
 				continue
 			}
 
-			// Coba setiap resep
-			for _, recipe := range recipes {
+			// find recipes that can create this element
+			currentTier, hasTier := tiers[current]
+			if !hasTier {
+				continue
+			}
+
+			for _, recipe := range elements[current] {
 				if len(recipe) != 2 {
 					continue
 				}
 
-				// Coba setiap bahan
-				for _, ingredient := range recipe {
-					if !isValidElement(ingredient, elements, tiers) {
-						continue
-					}
-					// Skip jika sudah dikunjungi
-					if _, visited := backwardVisited[ingredient]; visited {
-						continue
-					}
+				ing1, ing2 := recipe[0], recipe[1]
+				ing1Tier, hasIng1Tier := tiers[ing1]
+				ing2Tier, hasIng2Tier := tiers[ing2]
 
-					// Dapatkan tier dari bahan
-					ingTier, hasIngTier := tiers[ingredient]
-					if !hasIngTier {
-						// Skip jika tidak punya tier info
-						continue
-					}
+				if !hasIng1Tier || !hasIng2Tier || ing1Tier >= currentTier || ing2Tier >= currentTier {
+					continue
+				}
 
-					// Constraint tier: bahan harus tier lebih rendah dari hasil
-					if ingTier >= currentTier {
-						continue
-					}
+				// process each ingredient
+				for _, ing := range []string{ing1, ing2} {
+					if !backwardVisited[ing] {
+						backwardVisited[ing] = true
+						backwardQueue.PushBack(ing)
+						backwardParent[ing] = current
+						backwardIngredient[ing] = []string{ing1, ing2} // simpan resep dari elemen saat ini
 
-					// Buat state baru
-					newAvailable := make(map[string]bool)
-					for k, v := range current.AvailableElems {
-						newAvailable[k] = v
-					}
-					newAvailable[ingredient] = true
-
-					newPath := make([]string, len(current.Path))
-					copy(newPath, current.Path)
-					newPath = append(newPath, ingredient)
-
-					newSteps := make(map[string][]string)
-					for k, v := range current.PathSteps {
-						newSteps[k] = make([]string, len(v))
-						copy(newSteps[k], v)
-					}
-					newSteps[current.Element] = recipe
-
-					// Buat state baru
-					newState := BiState{
-						Element:        ingredient,
-						Path:           newPath,
-						PathSteps:      newSteps,
-						AvailableElems: newAvailable,
-					}
-
-					// Tambahkan ke queue dan visited
-					backwardQueue.PushBack(newState)
-					backwardVisited[ingredient] = newState
-
-					// Cek apakah ini elemen dasar
-					if basicElements[ingredient] {
-
-						// Gabungkan steps
-						allSteps := make(map[string][]string)
-						for k, v := range forwardVisited[ingredient].PathSteps {
-							allSteps[k] = v
-						}
-						for k, v := range newSteps {
-							allSteps[k] = v
-						}
-
-						// Rekonstruksi jalur
-						path := reconstructPathIterative(target, allSteps, basicElements, elements, tiers)
-						if path != nil {
-							return path, allSteps, nodesExplored, time.Since(startTime)
-						}
-					}
-
-					// Cek pertemuan
-					if _, ok := forwardVisited[ingredient]; ok {
-
-						// Gabungkan steps
-						allSteps := make(map[string][]string)
-						for k, v := range forwardVisited[ingredient].PathSteps {
-							allSteps[k] = v
-						}
-						for k, v := range newSteps {
-							allSteps[k] = v
-						}
-
-						// Rekonstruksi jalur
-						path := reconstructPathIterative(target, allSteps, basicElements, elements, tiers)
-						if path != nil {
-							return path, allSteps, nodesExplored, time.Since(startTime)
+						if forwardVisited[ing] {
+							meetingPoints[ing] = true
 						}
 					}
 				}
 			}
 		}
 
+		if len(meetingPoints) > 0 {
+			allSteps := make(map[string][]string)
+
+			// Add all forward recipes
+			for elem, recipe := range forwardRecipe {
+				allSteps[elem] = recipe
+			}
+
+			// Add all backward recipes
+			for _ = range meetingPoints {
+				path := reconstructPath(target, allSteps, basicElements, elements, tiers)
+				if path != nil {
+					return path, allSteps, nodesExplored, time.Since(startTime)
+				}
+			}
+		}
 	}
 
 	fmt.Println("No path found!")
 	return nil, nil, nodesExplored, time.Since(startTime)
 }
 
-// Implementasi DFS Bidirectional dengan constraint tier dan return time duration
 func BiSearchDFS(target string, elements map[string][][]string, basicElements map[string]bool, tiers map[string]int) ([]string, map[string][]string, int, time.Duration) {
-	// Catat waktu mulai
 	startTime := time.Now()
 
-	// Struktur state untuk stack
 	type SearchState struct {
 		Element   string
 		Available map[string]bool
 		Steps     map[string][]string
 	}
 
-	// Struktur data untuk DFS
 	forwardStack := list.New()
 	backwardStack := list.New()
 	forwardVisited := make(map[string]map[string][]string)
 	backwardVisited := make(map[string]map[string][]string)
 	nodesExplored := 0
 
-	// Inisialisasi forward stack dengan elemen dasar
 	for element := range basicElements {
 		available := make(map[string]bool)
 		for e := range basicElements {
@@ -376,40 +238,49 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 			Available: available,
 			Steps:     make(map[string][]string),
 		}
-
 		forwardStack.PushBack(state)
 	}
 
-	// Inisialisasi backward stack dengan target
 	backwardState := SearchState{
 		Element:   target,
 		Available: map[string]bool{target: true},
 		Steps:     make(map[string][]string),
 	}
+
+	if recipes, ok := elements[target]; ok {
+		for _, recipe := range recipes {
+			if len(recipe) == 2 {
+				targetTier, hasTier := tiers[target]
+				ing1Tier, hasIng1 := tiers[recipe[0]]
+				ing2Tier, hasIng2 := tiers[recipe[1]]
+
+				if hasTier && hasIng1 && hasIng2 &&
+					ing1Tier < targetTier && ing2Tier < targetTier {
+					backwardState.Steps[target] = recipe
+					break
+				}
+			}
+		}
+	}
+
 	backwardStack.PushBack(backwardState)
 
-	// Forward DFS loop
+	// forward dfs
 	for forwardStack.Len() > 0 {
-		// Pop dari stack
 		current := forwardStack.Remove(forwardStack.Back()).(SearchState)
 		nodesExplored++
 
-		// Skip jika sudah dikunjungi
 		if _, visited := forwardVisited[current.Element]; visited {
 			continue
 		}
 
-		// Tandai sebagai dikunjungi
 		stepsCopy := make(map[string][]string)
 		for k, v := range current.Steps {
-			stepsCopy[k] = make([]string, len(v))
-			copy(stepsCopy[k], v)
+			stepsCopy[k] = append([]string{}, v...)
 		}
 		forwardVisited[current.Element] = stepsCopy
 
-		// Cek pertemuan dengan backward search
 		if backwardSteps, found := backwardVisited[current.Element]; found {
-			// Gabungkan steps
 			allSteps := make(map[string][]string)
 			for k, v := range stepsCopy {
 				allSteps[k] = v
@@ -417,80 +288,57 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 			for k, v := range backwardSteps {
 				allSteps[k] = v
 			}
-
-			// Rekonstruksi jalur
-			path := reconstructPathIterative(target, allSteps, basicElements, elements, tiers)
-			if path != nil {
-				return path, allSteps, nodesExplored, time.Since(startTime)
+			if isStepsComplete(allSteps, basicElements) {
+				path := reconstructPath(target, allSteps, basicElements, elements, tiers)
+				if path != nil {
+					return path, allSteps, nodesExplored, time.Since(startTime)
+				}
 			}
 		}
 
-		// Cek apakah ini target
-		if current.Element == target {
-			path := reconstructPathIterative(target, current.Steps, basicElements, elements, tiers)
+		if current.Element == target && isStepsComplete(current.Steps, basicElements) {
+			path := reconstructPath(target, current.Steps, basicElements, elements, tiers)
 			if path != nil {
 				return path, current.Steps, nodesExplored, time.Since(startTime)
 			}
 		}
 
-		// Update available
 		newAvailable := make(map[string]bool)
 		for k, v := range current.Available {
 			newAvailable[k] = v
 		}
 		newAvailable[current.Element] = true
 
-		// Coba buat elemen baru
 		for resultElem, recipes := range elements {
-			// Skip jika sudah dikunjungi
 			if _, visited := forwardVisited[resultElem]; visited {
 				continue
 			}
-
-			// Dapatkan tier dari elemen hasil
-			resultTier, hasTier := tiers[resultElem]
-			if !hasTier {
-				// Skip jika tidak punya tier info
+			resultTier, ok := tiers[resultElem]
+			if !ok {
 				continue
 			}
 
-			// Coba setiap resep
 			for _, recipe := range recipes {
 				if len(recipe) != 2 {
 					continue
 				}
-
-				ing1 := recipe[0]
-				ing2 := recipe[1]
-
-				// Dapatkan tier dari bahan-bahan
-				ing1Tier, hasIng1Tier := tiers[ing1]
-				ing2Tier, hasIng2Tier := tiers[ing2]
-
-				// Skip jika tidak punya tier info
-				if !hasIng1Tier || !hasIng2Tier {
+				ing1, ing2 := recipe[0], recipe[1]
+				t1, ok1 := tiers[ing1]
+				t2, ok2 := tiers[ing2]
+				if !ok1 || !ok2 || t1 >= resultTier || t2 >= resultTier {
 					continue
 				}
 
-				// Constraint tier: bahan harus tier lebih rendah dari hasil
-				if ing1Tier >= resultTier || ing2Tier >= resultTier {
-					continue
-				}
+				ing1Avail := newAvailable[ing1] || current.Element == ing1
+				ing2Avail := newAvailable[ing2] || current.Element == ing2
 
-				// Cek apakah kedua bahan tersedia
-				ing1Available := newAvailable[ing1] || current.Element == ing1
-				ing2Available := newAvailable[ing2] || current.Element == ing2
-
-				if ing1Available && ing2Available {
-					// Buat state baru
+				if ing1Avail && ing2Avail {
 					newSteps := make(map[string][]string)
 					for k, v := range current.Steps {
-						newSteps[k] = make([]string, len(v))
-						copy(newSteps[k], v)
+						newSteps[k] = append([]string{}, v...)
 					}
 					newSteps[resultElem] = []string{ing1, ing2}
 
-					// Push ke stack
 					state := SearchState{
 						Element:   resultElem,
 						Available: newAvailable,
@@ -502,35 +350,27 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 		}
 	}
 
-	// Backward DFS loop
+	// backward dfs
 	for backwardStack.Len() > 0 {
-		// Pop dari stack
 		current := backwardStack.Remove(backwardStack.Back()).(SearchState)
 		nodesExplored++
 
-		// Skip jika sudah dikunjungi
 		if _, visited := backwardVisited[current.Element]; visited {
 			continue
 		}
 
-		// Dapatkan tier dari elemen saat ini
-		currentTier, hasTier := tiers[current.Element]
-		if !hasTier {
-			// Skip jika tidak punya tier info
+		currentTier, ok := tiers[current.Element]
+		if !ok {
 			continue
 		}
 
-		// Tandai sebagai dikunjungi
 		stepsCopy := make(map[string][]string)
 		for k, v := range current.Steps {
-			stepsCopy[k] = make([]string, len(v))
-			copy(stepsCopy[k], v)
+			stepsCopy[k] = append([]string{}, v...)
 		}
 		backwardVisited[current.Element] = stepsCopy
 
-		// Cek pertemuan dengan forward search
 		if forwardSteps, found := forwardVisited[current.Element]; found {
-			// Gabungkan steps
 			allSteps := make(map[string][]string)
 			for k, v := range forwardSteps {
 				allSteps[k] = v
@@ -538,89 +378,60 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 			for k, v := range stepsCopy {
 				allSteps[k] = v
 			}
-
-			// Rekonstruksi jalur
-			path := reconstructPathIterative(target, allSteps, basicElements, elements, tiers)
-			if path != nil {
-				return path, allSteps, nodesExplored, time.Since(startTime)
-			}
-		}
-
-		// Cek apakah ini elemen dasar
-		if basicElements[current.Element] {
-			if forwardSteps, found := forwardVisited[current.Element]; found {
-				// Gabungkan steps
-				allSteps := make(map[string][]string)
-				maps.Copy(allSteps, forwardSteps)
-				for k, v := range stepsCopy {
-					allSteps[k] = v
-				}
-
-				// Rekonstruksi jalur
-				path := reconstructPathIterative(target, allSteps, basicElements, elements, tiers)
+			if isStepsComplete(allSteps, basicElements) {
+				path := reconstructPath(target, allSteps, basicElements, elements, tiers)
 				if path != nil {
 					return path, allSteps, nodesExplored, time.Since(startTime)
 				}
 			}
 		}
 
-		// Cari resep yang menghasilkan elemen ini
 		recipes, hasRecipes := elements[current.Element]
 		if !hasRecipes {
 			continue
 		}
 
-		// Coba setiap resep
 		for _, recipe := range recipes {
 			if len(recipe) != 2 {
 				continue
 			}
 
-			// Simpan resep
+			ing1, ing2 := recipe[0], recipe[1]
+			t1, ok1 := tiers[ing1]
+			t2, ok2 := tiers[ing2]
+			if !ok1 || !ok2 || t1 >= currentTier || t2 >= currentTier {
+				continue
+			}
+
 			newSteps := make(map[string][]string)
 			for k, v := range current.Steps {
-				newSteps[k] = make([]string, len(v))
-				copy(newSteps[k], v)
+				newSteps[k] = append([]string{}, v...)
 			}
 			newSteps[current.Element] = recipe
 
-			// Coba setiap bahan
-			for _, ingredient := range recipe {
-				// Skip jika sudah dikunjungi
-				if !isValidElement(ingredient, elements, tiers) {
-					continue
+			// push ing1
+			if isValidElement(ing1, elements, tiers) {
+				if _, visited := backwardVisited[ing1]; !visited {
+					state := SearchState{
+						Element:   ing1,
+						Available: cloneMap(current.Available),
+						Steps:     newSteps,
+					}
+					state.Available[ing1] = true
+					backwardStack.PushBack(state)
 				}
-				if _, visited := backwardVisited[ingredient]; visited {
-					continue
+			}
+			// push ing2
+			if isValidElement(ing2, elements, tiers) {
+				if _, visited := backwardVisited[ing2]; !visited {
+					state := SearchState{
+						Element:   ing2,
+						Available: cloneMap(current.Available),
+						Steps:     newSteps,
+					}
+					state.Available[ing2] = true
+					backwardStack.PushBack(state)
 				}
-
-				// Dapatkan tier dari bahan
-				ingTier, hasIngTier := tiers[ingredient]
-				if !hasIngTier {
-					// Skip jika tidak punya tier info
-					continue
-				}
-
-				// Constraint tier: bahan harus tier lebih rendah dari hasil
-				if ingTier >= currentTier {
-					continue
-				}
-
-				// Buat state baru
-				state := SearchState{
-					Element:   ingredient,
-					Available: make(map[string]bool),
-					Steps:     newSteps,
-				}
-
-				// Copy available dan tambahkan ingredient
-				for k, v := range current.Available {
-					state.Available[k] = v
-				}
-				state.Available[ingredient] = true
-
-				// Push ke stack
-				backwardStack.PushBack(state)
 			}
 		}
 	}
@@ -628,164 +439,104 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 	fmt.Println("No path found after exploring", nodesExplored, "nodes")
 	return nil, nil, nodesExplored, time.Since(startTime)
 }
+func isStepsComplete(steps map[string][]string, basicElements map[string]bool) bool {
+	for _, ingredients := range steps {
+		for _, ing := range ingredients {
+			if !basicElements[ing] && steps[ing] == nil {
+				return false
+			}
+		}
+	}
+	return true
+}
 
-// Rekonstruksi jalur secara iteratif (tanpa rekursi)
-func reconstructPathIterative(target string, steps map[string][]string, basicElements map[string]bool,
-	elements map[string][][]string, tiers map[string]int) []string {
-	if !isValidElement(target, elements, tiers) {
-		fmt.Printf("Target is not a valid element: %s\n", target)
-		return nil
+func cloneMap(src map[string]bool) map[string]bool {
+	copy := make(map[string]bool)
+	for k, v := range src {
+		copy[k] = v
+	}
+	return copy
+}
+
+func reconstructPath(target string, steps map[string][]string, basicElements map[string]bool,
+	_ map[string][][]string, tiers map[string]int) []string {
+
+	dependsOn := make(map[string][]string) // element -> ingredients1, ingredients2
+	inDegree := make(map[string]int)       // berapa banyak ingredient yang dibutuhkan untuk membuat element
+
+	// untuk setiap elemen di steps, simpan dua bahan pembuatnya
+	for elem, ingredients := range steps {
+		if len(ingredients) == 2 {
+			ing1, ing2 := ingredients[0], ingredients[1]
+
+			// Validasi tier
+			elemTier, hasTier := tiers[elem]
+			ing1Tier, hasIng1Tier := tiers[ing1]
+			ing2Tier, hasIng2Tier := tiers[ing2]
+
+			if !hasTier || !hasIng1Tier || !hasIng2Tier {
+				continue // skip jika tidak ada info tier
+			}
+
+			if ing1Tier >= elemTier || ing2Tier >= elemTier {
+				continue // skip jika melanggar constraint tier
+			}
+
+			dependsOn[elem] = []string{ing1, ing2}
+			inDegree[elem] = 2
+		}
 	}
 
-	// Cek apakah target punya resep
-	if _, hasTargetRecipe := steps[target]; !hasTargetRecipe {
-		recipes, ok := elements[target]
-		if !ok || len(recipes) == 0 {
-			fmt.Printf("No recipe found for target: %s\n", target)
-			return nil
+	var queue []string
+
+	// Tambahkan elemen dasar ke queue
+	for elem := range basicElements {
+		queue = append(queue, elem)
+	}
+
+	// Elemen yang sudah tersedia
+	available := make(map[string]bool)
+	for elem := range basicElements {
+		available[elem] = true
+	}
+
+	var buildPath []string
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		// skip elemen dasar dalam path final
+		if !basicElements[current] {
+			buildPath = append(buildPath, current)
 		}
 
-		_, hasTier := tiers[target]
-		if !hasTier {
-			fmt.Printf("No tier info for target: %s\n", target)
-			return nil
-		}
-		validFound := false
-		for _, recipe := range recipes {
-			if len(recipe) != 2 {
-				continue
-			}
-			ing1, ing2 := recipe[0], recipe[1]
-			t1, ok1 := tiers[ing1]
-			t2, ok2 := tiers[ing2]
-			targetTier, okTarget := tiers[target]
-			if !isValidElement(ing1, elements, tiers) || !isValidElement(ing2, elements, tiers) {
-				continue
-			}
-			if !ok1 || !ok2 || !okTarget {
-				continue
-			}
-			if t1 >= targetTier || t2 >= targetTier {
-				continue
-			}
+		available[current] = true
 
-			steps[target] = recipe
-			validFound = true
+		if current == target {
 			break
 		}
 
-		if !validFound {
-			return nil
-		}
-
-	}
-
-	type StackItem struct {
-		Element string
-		Visited bool
-	}
-
-	stack := list.New()
-	stack.PushBack(StackItem{Element: target, Visited: false})
-
-	available := make(map[string]bool)
-	for e := range basicElements {
-		available[e] = true
-	}
-	visited := make(map[string]bool)
-	var finalPath []string
-
-	for stack.Len() > 0 {
-		item := stack.Back().Value.(StackItem)
-		stack.Remove(stack.Back())
-
-		if available[item.Element] {
-			continue
-		}
-		if !isValidElement(item.Element, elements, tiers) {
-			continue
-		}
-
-		if !item.Visited {
-			stack.PushBack(StackItem{Element: item.Element, Visited: true})
-
-			recipe, hasRecipe := steps[item.Element]
-			if !hasRecipe {
-				recipes, ok := elements[item.Element]
-				if !ok || len(recipes) == 0 {
-					fmt.Printf("No recipe found for: %s\n", item.Element)
-					continue
-				}
-				elemTier, hasTier := tiers[item.Element]
-				if !hasTier {
-					fmt.Printf("No tier info for: %s\n", item.Element)
-					continue
-				}
-				for _, r := range recipes {
-					if len(r) != 2 {
-						continue
-					}
-					ing1, ing2 := r[0], r[1]
-					t1, ok1 := tiers[ing1]
-					t2, ok2 := tiers[ing2]
-					if !ok1 || !ok2 {
-						continue
-					}
-					if t1 >= elemTier || t2 >= elemTier {
-						continue
-					}
-					recipe = r
-					steps[item.Element] = r
-					break
-				}
+		for elem, ingredients := range dependsOn {
+			if available[elem] {
+				continue
 			}
 
-			for _, ingredient := range recipe {
-				if !available[ingredient] && !visited[ingredient] {
-					stack.PushBack(StackItem{Element: ingredient, Visited: false})
-				}
-				if !isValidElement(ingredient, elements, tiers) {
-					return nil
-				}
+			if ingredients[0] == current || ingredients[1] == current {
+				inDegree[elem]--
 			}
-		} else {
-			allAvailable := true
-			for _, ing := range steps[item.Element] {
-				if !available[ing] {
-					allAvailable = false
-					break
-				}
-			}
-			if allAvailable {
-				finalPath = append(finalPath, item.Element)
-				available[item.Element] = true
-				visited[item.Element] = true
-			} else {
-				fmt.Printf("Not all ingredients available for: %s\n", item.Element)
-				return nil
+
+			// kalau bahan sudah tersedia, masukkin ke jalur
+			if inDegree[elem] == 0 {
+				queue = append(queue, elem)
 			}
 		}
 	}
 
-	return filterBasicElements(finalPath, basicElements)
-}
-
-// Filter elemen dasar dari jalur
-func filterBasicElements(path []string, basicElements map[string]bool) []string {
-	var filtered []string
-	basicAdded := make(map[string]bool)
-
-	for _, elem := range path {
-		if basicElements[elem] {
-			// Hanya tambahkan elemen dasar sekali
-			if !basicAdded[elem] {
-				filtered = append(filtered, elem)
-				basicAdded[elem] = true
-			}
-		} else {
-			filtered = append(filtered, elem)
-		}
+	// cek apakah target ditemukan
+	if !available[target] {
+		return nil
 	}
 
-	return filtered
+	return buildPath
 }

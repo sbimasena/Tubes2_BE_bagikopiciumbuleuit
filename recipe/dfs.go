@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// ElementRecipe struct from your existing code
 type ElementRecipe struct {
 	Element  string      `json:"element"`
 	ImageURL string      `json:"image_url"`
@@ -14,13 +13,25 @@ type ElementRecipe struct {
 	Tier     int         `json:"tier"`
 }
 
-// Path represents a sequence of combinations to create an element
 type Path struct {
 	Steps     []Step `json:"steps"`
 	FinalItem string `json:"final_item"`
 }
 
-// Step represents a single combination in a path
+/*
+*
+
+	Path{
+	  FinalItem: "Barn",
+	  Steps: []Step{
+	    {Ingredients: [2]string{"Wall", "Wall"}, Result: "House"},
+	    {Ingredients: [2]string{"Plow", "Earth"}, Result: "Field"},
+	    {Ingredients: [2]string{"House", "Field"}, Result: "Barn"},
+	  },
+	}
+
+*
+*/
 type Step struct {
 	Ingredients [2]string `json:"ingredients"`
 	Result      string    `json:"result"`
@@ -29,10 +40,9 @@ type Step struct {
 func findPathDFS(recipes []ElementRecipe, startElements []string, target string) ([]Path, time.Duration, int) {
 	startTime := time.Now()
 
-	// Build lookup maps
-	elementMap := make(map[string]ElementRecipe)
-	tierMap := make(map[string]int)
-	recipeMap := make(map[string][][2]string)
+	elementMap := make(map[string]ElementRecipe) // just like the json
+	tierMap := make(map[string]int)              // element -> tier
+	recipeMap := make(map[string][][2]string)    // element -> all recipe
 
 	for _, recipe := range recipes {
 		elementMap[recipe.Element] = recipe
@@ -40,46 +50,46 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 		recipeMap[recipe.Element] = append(recipeMap[recipe.Element], recipe.Recipes...)
 	}
 
-	for _, elem := range startElements {
-		if _, exists := tierMap[elem]; !exists {
-			tierMap[elem] = 1
-		}
-	}
+	// for _, elem := range startElements {
+	// 	if _, exists := tierMap[elem]; !exists {
+	// 		tierMap[elem] = 1
+	// 	}
+	// }
 
 	basics := make(map[string]bool)
 	for _, e := range startElements {
 		basics[e] = true
 	}
 
-	// Modifikasi: memo hanya menyimpan apakah elemen sudah pernah berhasil dibuat atau tidak
-	// Tidak menyimpan jalur terbaik untuk elemen tersebut
 	memo := make(map[string]bool)
 	visitedCounter := make(map[string]bool)
 
 	var dfs func(string) *Path
 	dfs = func(current string) *Path {
-		if basics[current] {
+		if basics[current] { // return if target = basic elements
 			return &Path{Steps: []Step{}, FinalItem: current}
 		}
 
+		// check if element has been viisted but failed
 		if success, ok := memo[current]; ok && !success {
 			return nil
 		}
 
 		visitedCounter[current] = true
 
-		combos, ok := recipeMap[current]
+		combos, ok := recipeMap[current] // look for the recipe in recipeMap
 		if !ok {
 			memo[current] = false
 			return nil
 		}
-
+		// check the possible combo
 		for _, combo := range combos {
 			a, b := combo[0], combo[1]
 			aTier, aOk := tierMap[a]
 			bTier, bOk := tierMap[b]
 			resultTier := tierMap[current]
 
+			//continue to the next combo if not valid
 			if !aOk || !bOk {
 				continue
 			}
@@ -88,6 +98,8 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 				continue
 			}
 
+			//continue to the next combo if elements cant be crafted
+			//dfs karena ngabisin path nya A dulu baru ke B
 			pathA := dfs(a)
 			if pathA == nil {
 				continue
@@ -98,7 +110,7 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 				continue
 			}
 
-			// Gabungkan steps tanpa duplikat
+			// merge steps without duplicate (pathA and pathB)
 			stepSet := make(map[[3]string]bool)
 			var steps []Step
 
@@ -117,7 +129,7 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 				}
 			}
 
-			// Tambahkan langkah terakhir
+			// add the last step to make the current element
 			k := [3]string{a, b, current}
 			if !stepSet[k] {
 				steps = append(steps, Step{Ingredients: [2]string{a, b}, Result: current})

@@ -126,11 +126,10 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 		allSteps       []map[string][]string
 		totalNodes     int
 		startTime      = time.Now()
-		pathSignatures = make(map[string]bool, maxPaths) // Pre-allocate with expected capacity
+		pathSignatures = make(map[string]bool, maxPaths) 
 	)
 	fmt.Println("Finding up to", maxPaths, "different paths for", target)
 
-	// Use a wait group to manage goroutines
 	var wg sync.WaitGroup
 	resultChan := make(chan struct {
 		path  []string
@@ -138,14 +137,13 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 		nodes int
 	}, maxPaths)
 
-	// Launch search attempts concurrently
-	attemptsToRun := maxPaths * 3 // Reduced from 5x to 3x
+	attemptsToRun := maxPaths * 3 
+	
 	for attempt := 0; attempt < attemptsToRun; attempt++ {
 		wg.Add(1)
 		go func(attemptNum int) {
 			defer wg.Done()
 
-			// Don't proceed if we already have enough paths
 			if len(pathSignatures) >= maxPaths {
 				return
 			}
@@ -158,7 +156,6 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 				return
 			}
 
-			// Send result to channel
 			resultChan <- struct {
 				path  []string
 				steps map[string][]string
@@ -167,20 +164,18 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 		}(attempt)
 	}
 
-	// Close channel when all goroutines complete
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
 
-	// Process results as they arrive
 	for result := range resultChan {
 		// Early exit if we have enough paths
 		if len(paths) >= maxPaths {
 			break
 		}
 
-		signature := hashPath(result.path) // Using a faster hashing function
+		signature := hashPath(result.path)
 		if pathSignatures[signature] {
 			continue
 		}
@@ -190,7 +185,6 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 		allSteps = append(allSteps, result.steps)
 		totalNodes += result.nodes
 
-		// Exit early if we've found enough paths
 		if len(paths) >= maxPaths {
 			break
 		}
@@ -209,10 +203,9 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 	return paths, allSteps, totalNodes, duration
 }
 
-// A faster hashing function for paths
 func hashPath(path []string) string {
 	var b strings.Builder
-	b.Grow(len(path) * 16) // Pre-allocate buffer size
+	b.Grow(len(path) * 16) 
 
 	for i, elem := range path {
 		if i > 0 {
@@ -389,7 +382,7 @@ func FindMultipleRecipesDFSConcurrent(recipesFile, targetElement string, startin
 		return nil, 0, 0
 	}
 
-	// Create recipe variations
+	// create recipe variations
 	variations := make([][]ElementRecipe, maxRecipes*5)
 	variations[0] = make([]ElementRecipe, len(recipes))
 	copy(variations[0], recipes)
@@ -401,21 +394,20 @@ func FindMultipleRecipesDFSConcurrent(recipesFile, targetElement string, startin
 		allPaths       []Path
 		pathSignatures = map[string]bool{}
 		totalVisited   int
-		mu             sync.Mutex
-		wg             sync.WaitGroup
+		mu             sync.Mutex     // mutex utk antar goroutine
+		wg             sync.WaitGroup // utk nungu semua goroutine selesai
 		startTime      = time.Now()
 	)
 
-	resultChan := make(chan struct {
+	resultChan := make(chan struct { // utk kirim hasil antar goroutine
 		path    Path
 		visited int
 		varIdx  int
 	}, len(variations))
 
 	const maxConcurrent = 5
-	sem := make(chan struct{}, maxConcurrent)
+	sem := make(chan struct{}, maxConcurrent) // manual semaphore
 
-	// Collector goroutine
 	go func() {
 		for result := range resultChan {
 			mu.Lock()
@@ -429,6 +421,7 @@ func FindMultipleRecipesDFSConcurrent(recipesFile, targetElement string, startin
 		}
 	}()
 
+	// loop all variation parallelly
 	for varIdx, recipeVariation := range variations {
 		mu.Lock()
 		if len(allPaths) >= maxRecipes {
@@ -438,7 +431,7 @@ func FindMultipleRecipesDFSConcurrent(recipesFile, targetElement string, startin
 		mu.Unlock()
 
 		wg.Add(1)
-		sem <- struct{}{}
+		sem <- struct{}{} // masuk ke semaphore
 		go func(recipes []ElementRecipe, idx int) {
 			defer wg.Done()
 			defer func() { <-sem }()
@@ -448,13 +441,13 @@ func FindMultipleRecipesDFSConcurrent(recipesFile, targetElement string, startin
 				visited int
 			}
 
-			innerChan := make(chan localResult, 1)
+			innerChan := make(chan localResult, 1) // jalankin dfs dlam goroutine
 			go func() {
 				paths, _, visited := findPathDFS(recipes, startingElements, targetElement)
 				innerChan <- localResult{paths, visited}
 			}()
 
-			result := <-innerChan
+			result := <-innerChan // masukkin ke result channel utama
 			if len(result.paths) > 0 {
 				resultChan <- struct {
 					path    Path
@@ -468,6 +461,7 @@ func FindMultipleRecipesDFSConcurrent(recipesFile, targetElement string, startin
 	wg.Wait()
 	close(resultChan)
 
+	// urutin dari paling pendek
 	sort.Slice(allPaths, func(i, j int) bool {
 		return len(allPaths[i].Steps) < len(allPaths[j].Steps)
 	})
@@ -489,18 +483,18 @@ func createRecipeVariation(recipes []ElementRecipe, seed int) []ElementRecipe {
 			Tier:     recipe.Tier,
 		}
 		if len(recipe.Recipes) > 1 {
-			// Deep copy recipes
+			// deep copy recipes
 			recipesCopy := make([][2]string, len(recipe.Recipes))
 			copy(recipesCopy, recipe.Recipes)
 
-			// Shuffle the recipes
+			// shuffle the recipes
 			r.Shuffle(len(recipesCopy), func(i, j int) {
 				recipesCopy[i], recipesCopy[j] = recipesCopy[j], recipesCopy[i]
 			})
 
 			recipeCopy.Recipes = recipesCopy
 		} else {
-			// Just copy without shuffling
+			// just copy without shuffling
 			recipeCopy.Recipes = make([][2]string, len(recipe.Recipes))
 			copy(recipeCopy.Recipes, recipe.Recipes)
 		}
