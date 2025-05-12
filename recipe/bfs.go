@@ -1,7 +1,6 @@
 package recipe
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -72,7 +71,7 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 			}
 		}
 
-		fmt.Printf("Exploring: %v, Steps: %d\n", curr.Remaining, len(curr.Steps))
+		// fmt.Printf("Exploring: %v, Steps: %d\n", curr.Remaining, len(curr.Steps))
 		if allBasic {
 			reversedSteps := make([]Step, len(curr.Steps))
 			for i, step := range curr.Steps {

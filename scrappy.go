@@ -51,7 +51,7 @@ func getDoc() (*goquery.Document, error) {
 	return goquery.NewDocumentFromReader(res.Body)
 }
 
-func mainScrap() {
+func mainScrap() error {
 	start := time.Now()
 	doc, err := getDoc()
 	if err != nil {
@@ -528,4 +528,6 @@ func mainScrap() {
 	enc.Encode(results)
 
 	fmt.Printf("✅ Selesai dalam %s, total elemen: %d\n", time.Since(start), len(results))
+
+	return err
 }
