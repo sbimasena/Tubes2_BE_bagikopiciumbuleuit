@@ -329,6 +329,14 @@ func generateSignature(path Path) string {
 
 func FindSingleRecipeDFS(recipesFile, targetElement string, startingElements []string) (*Path, int, time.Duration) {
 	recipes, err := LoadRecipes(recipesFile)
+
+	for _, elem := range startingElements {
+		if elem == targetElement {
+			fmt.Printf("Target element '%s' is already in starting elements\n", targetElement)
+			return nil, 0, 0
+		}
+	}
+
 	if err != nil {
 		log.Fatalf("Error loading recipes: %v", err)
 		return nil, 0, 0
@@ -355,6 +363,14 @@ func FindSingleRecipeDFS(recipesFile, targetElement string, startingElements []s
 
 func FindMultipleRecipesDFSConcurrent(recipesFile, targetElement string, startingElements []string, maxRecipes int) ([]Path, int, time.Duration) {
 	recipes, err := LoadRecipes(recipesFile)
+
+	for _, elem := range startingElements {
+		if elem == targetElement {
+			fmt.Printf("Target element '%s' is already in starting elements\n", targetElement)
+			return nil, 0, 0
+		}
+	}
+
 	if err != nil {
 		log.Fatalf("Error loading recipes: %v", err)
 		return nil, 0, 0
@@ -501,6 +517,14 @@ func isBasicElement(element string, basicElements []string) bool {
 
 func FindSingleRecipeBFS(recipesFile, targetElement string, startingElements []string) (*Path, int, time.Duration) {
 	recipes, err := LoadRecipes(recipesFile)
+
+	for _, elem := range startingElements {
+		if elem == targetElement {
+			fmt.Printf("Target element '%s' is already in starting elements\n", targetElement)
+			return nil, 0, 0
+		}
+	}
+
 	if err != nil {
 		log.Fatalf("Error loading recipes: %v", err)
 		return nil, 0, 0
@@ -531,6 +555,14 @@ func FindSingleRecipeBFS(recipesFile, targetElement string, startingElements []s
 func FindMultipleRecipesBFSConcurrent(recipesFile, targetElement string, startingElements []string, maxRecipes int) ([]Path, int, time.Duration) {
 	startTime := time.Now()
 	recipes, err := LoadRecipes(recipesFile)
+
+	for _, elem := range startingElements {
+		if elem == targetElement {
+			fmt.Printf("Target element '%s' is already in starting elements\n", targetElement)
+			return nil, 0, 0
+		}
+	}
+
 	if err != nil {
 		log.Fatalf("Error loading recipes: %v", err)
 		return nil, 0, 0
