@@ -121,63 +121,106 @@ func PrepareElementMaps(elements []ElementData) (map[string][][]string, map[stri
 }
 
 func BiSearchMultipleBFS(target string, elements map[string][][]string, basicElements map[string]bool, maxPaths int, tierMap map[string]int) ([][]string, []map[string][]string, int, time.Duration) {
-	var (
-		paths          [][]string
-		allSteps       []map[string][]string
-		totalNodes     int
-		startTime      = time.Now()
-		pathSignatures = map[string]bool{}
-	)
+    var (
+        paths          [][]string
+        allSteps       []map[string][]string
+        totalNodes     int
+        startTime      = time.Now()
+        pathSignatures = make(map[string]bool, maxPaths) // Pre-allocate with expected capacity
+    )
+    fmt.Println("Finding up to", maxPaths, "different paths for", target)
 
-	fmt.Println("Finding up to", maxPaths, "different paths for", target)
+    // Use a wait group to manage goroutines
+    var wg sync.WaitGroup
+    resultChan := make(chan struct{
+        path  []string
+        steps map[string][]string
+        nodes int
+    }, maxPaths)
 
-	for attempt := 0; attempt < maxPaths*5; attempt++ {
-		if len(paths) >= maxPaths {
-			break
-		}
+    // Launch search attempts concurrently
+    attemptsToRun := maxPaths * 3 // Reduced from 5x to 3x
+    for attempt := 0; attempt < attemptsToRun; attempt++ {
+        wg.Add(1)
+        go func(attemptNum int) {
+            defer wg.Done()
+            
+            // Don't proceed if we already have enough paths
+            if len(pathSignatures) >= maxPaths {
+                return
+            }
+            
+            elementsCopy := copyElements(elements)
+            shuffleRecipes(elementsCopy, attemptNum)
+            
+            path, steps, nodes, _ := BiSearchBFS(target, elementsCopy, basicElements, tierMap)
+            if path == nil {
+                return
+            }
+            
+            // Send result to channel
+            resultChan <- struct{
+                path  []string
+                steps map[string][]string
+                nodes int
+            }{path, steps, nodes}
+        }(attempt)
+    }
 
-		elementsCopy := copyElements(elements)
-		shuffleRecipes(elementsCopy, attempt)
+    // Close channel when all goroutines complete
+    go func() {
+        wg.Wait()
+        close(resultChan)
+    }()
 
-		var p []string
-		var s map[string][]string
-		var n int
+    // Process results as they arrive
+    for result := range resultChan {
+        // Early exit if we have enough paths
+        if len(paths) >= maxPaths {
+            break
+        }
+        
+        signature := hashPath(result.path) // Using a faster hashing function
+        if pathSignatures[signature] {
+            continue
+        }
+        
+        pathSignatures[signature] = true
+        paths = append(paths, result.path)
+        allSteps = append(allSteps, result.steps)
+        totalNodes += result.nodes
+        
+        // Exit early if we've found enough paths
+        if len(paths) >= maxPaths {
+            break
+        }
+    }
 
-		done := make(chan bool)
+    duration := time.Since(startTime)
+    fmt.Printf("Total nodes explored: %d\n", totalNodes)
+    fmt.Printf("Total execution time: %v\n", duration)
+    
+    if len(paths) < maxPaths {
+        fmt.Printf("Only found %d different paths (of %d requested)\n", len(paths), maxPaths)
+    } else {
+        fmt.Printf("Found %d different paths\n", len(paths))
+    }
+    
+    return paths, allSteps, totalNodes, duration
+}
 
-		go func() {
-			p, s, n, _ = BiSearchBFS(target, elementsCopy, basicElements, tierMap)
-			done <- true
-		}()
-
-		<-done
-
-		if p == nil {
-			continue
-		}
-
-		signature := fmt.Sprintf("%v", p)
-		if pathSignatures[signature] {
-			continue
-		}
-
-		pathSignatures[signature] = true
-		paths = append(paths, p)
-		allSteps = append(allSteps, s)
-		totalNodes += n
-	}
-
-	duration := time.Since(startTime)
-	fmt.Printf("Total nodes explored: %d\n", totalNodes)
-	fmt.Printf("Total execution time: %v\n", duration)
-
-	if len(paths) < maxPaths {
-		fmt.Printf("Only found %d different paths (of %d requested)\n", len(paths), maxPaths)
-	} else {
-		fmt.Printf("Found %d different paths\n", len(paths))
-	}
-
-	return paths, allSteps, totalNodes, duration
+// A faster hashing function for paths
+func hashPath(path []string) string {
+    var b strings.Builder
+    b.Grow(len(path) * 16) // Pre-allocate buffer size
+    
+    for i, elem := range path {
+        if i > 0 {
+            b.WriteByte('|')
+        }
+        b.WriteString(elem)
+    }
+    return b.String()
 }
 
 func BiSearchMultipleDFS(target string, elements map[string][][]string, basicElements map[string]bool, maxPaths int, tierMap map[string]int) ([][]string, []map[string][]string, int, time.Duration) {
