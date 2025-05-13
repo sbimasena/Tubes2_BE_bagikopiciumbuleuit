@@ -193,12 +193,12 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 		if len(meetingPoints) > 0 {
 			allSteps := make(map[string][]string)
 
-			// Add all forward recipes
+			// add all forward recipes
 			for elem, recipe := range forwardRecipe {
 				allSteps[elem] = recipe
 			}
 
-			// Add all backward recipes
+			// add all backward recipes
 			for _ = range meetingPoints {
 				path := reconstructPath(target, allSteps, basicElements, elements, tiers)
 				if path != nil {
@@ -265,56 +265,131 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 
 	backwardStack.PushBack(backwardState)
 
-	// forward dfs
-	for forwardStack.Len() > 0 {
-		current := forwardStack.Remove(forwardStack.Back()).(SearchState)
-		nodesExplored++
+	// Alternating bidirectional DFS
+	for forwardStack.Len() > 0 || backwardStack.Len() > 0 {
+		// forward dfs step
+		if forwardStack.Len() > 0 {
+			current := forwardStack.Remove(forwardStack.Back()).(SearchState)
+			nodesExplored++
 
-		if _, visited := forwardVisited[current.Element]; visited {
-			continue
-		}
-
-		stepsCopy := make(map[string][]string)
-		for k, v := range current.Steps {
-			stepsCopy[k] = append([]string{}, v...)
-		}
-		forwardVisited[current.Element] = stepsCopy
-
-		if backwardSteps, found := backwardVisited[current.Element]; found {
-			allSteps := make(map[string][]string)
-			for k, v := range stepsCopy {
-				allSteps[k] = v
+			if _, visited := forwardVisited[current.Element]; visited {
+				continue
 			}
-			for k, v := range backwardSteps {
-				allSteps[k] = v
+
+			stepsCopy := make(map[string][]string)
+			for k, v := range current.Steps {
+				stepsCopy[k] = append([]string{}, v...)
 			}
-			if isStepsComplete(allSteps, basicElements) {
-				path := reconstructPath(target, allSteps, basicElements, elements, tiers)
+			forwardVisited[current.Element] = stepsCopy
+
+			if backwardSteps, found := backwardVisited[current.Element]; found {
+				allSteps := make(map[string][]string)
+				for k, v := range stepsCopy {
+					allSteps[k] = v
+				}
+				for k, v := range backwardSteps {
+					allSteps[k] = v
+				}
+				if isStepsComplete(allSteps, basicElements) {
+					path := reconstructPath(target, allSteps, basicElements, elements, tiers)
+					if path != nil {
+						return path, allSteps, nodesExplored, time.Since(startTime)
+					}
+				}
+			}
+
+			if current.Element == target && isStepsComplete(current.Steps, basicElements) {
+				path := reconstructPath(target, current.Steps, basicElements, elements, tiers)
 				if path != nil {
-					return path, allSteps, nodesExplored, time.Since(startTime)
+					return path, current.Steps, nodesExplored, time.Since(startTime)
+				}
+			}
+
+			newAvailable := make(map[string]bool)
+			for k, v := range current.Available {
+				newAvailable[k] = v
+			}
+			newAvailable[current.Element] = true
+
+			for resultElem, recipes := range elements {
+				if _, visited := forwardVisited[resultElem]; visited {
+					continue
+				}
+				resultTier, ok := tiers[resultElem]
+				if !ok {
+					continue
+				}
+
+				for _, recipe := range recipes {
+					if len(recipe) != 2 {
+						continue
+					}
+					ing1, ing2 := recipe[0], recipe[1]
+					t1, ok1 := tiers[ing1]
+					t2, ok2 := tiers[ing2]
+					if !ok1 || !ok2 || t1 >= resultTier || t2 >= resultTier {
+						continue
+					}
+
+					ing1Avail := newAvailable[ing1] || current.Element == ing1
+					ing2Avail := newAvailable[ing2] || current.Element == ing2
+
+					if ing1Avail && ing2Avail {
+						newSteps := make(map[string][]string)
+						for k, v := range current.Steps {
+							newSteps[k] = append([]string{}, v...)
+						}
+						newSteps[resultElem] = []string{ing1, ing2}
+
+						state := SearchState{
+							Element:   resultElem,
+							Available: newAvailable,
+							Steps:     newSteps,
+						}
+						forwardStack.PushBack(state)
+					}
 				}
 			}
 		}
 
-		if current.Element == target && isStepsComplete(current.Steps, basicElements) {
-			path := reconstructPath(target, current.Steps, basicElements, elements, tiers)
-			if path != nil {
-				return path, current.Steps, nodesExplored, time.Since(startTime)
-			}
-		}
+		// backward dfs step
+		if backwardStack.Len() > 0 {
+			current := backwardStack.Remove(backwardStack.Back()).(SearchState)
+			nodesExplored++
 
-		newAvailable := make(map[string]bool)
-		for k, v := range current.Available {
-			newAvailable[k] = v
-		}
-		newAvailable[current.Element] = true
-
-		for resultElem, recipes := range elements {
-			if _, visited := forwardVisited[resultElem]; visited {
+			if _, visited := backwardVisited[current.Element]; visited {
 				continue
 			}
-			resultTier, ok := tiers[resultElem]
+
+			currentTier, ok := tiers[current.Element]
 			if !ok {
+				continue
+			}
+
+			stepsCopy := make(map[string][]string)
+			for k, v := range current.Steps {
+				stepsCopy[k] = append([]string{}, v...)
+			}
+			backwardVisited[current.Element] = stepsCopy
+
+			if forwardSteps, found := forwardVisited[current.Element]; found {
+				allSteps := make(map[string][]string)
+				for k, v := range forwardSteps {
+					allSteps[k] = v
+				}
+				for k, v := range stepsCopy {
+					allSteps[k] = v
+				}
+				if isStepsComplete(allSteps, basicElements) {
+					path := reconstructPath(target, allSteps, basicElements, elements, tiers)
+					if path != nil {
+						return path, allSteps, nodesExplored, time.Since(startTime)
+					}
+				}
+			}
+
+			recipes, hasRecipes := elements[current.Element]
+			if !hasRecipes {
 				continue
 			}
 
@@ -322,115 +397,43 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 				if len(recipe) != 2 {
 					continue
 				}
+
 				ing1, ing2 := recipe[0], recipe[1]
 				t1, ok1 := tiers[ing1]
 				t2, ok2 := tiers[ing2]
-				if !ok1 || !ok2 || t1 >= resultTier || t2 >= resultTier {
+				if !ok1 || !ok2 || t1 >= currentTier || t2 >= currentTier {
 					continue
 				}
 
-				ing1Avail := newAvailable[ing1] || current.Element == ing1
-				ing2Avail := newAvailable[ing2] || current.Element == ing2
-
-				if ing1Avail && ing2Avail {
-					newSteps := make(map[string][]string)
-					for k, v := range current.Steps {
-						newSteps[k] = append([]string{}, v...)
-					}
-					newSteps[resultElem] = []string{ing1, ing2}
-
-					state := SearchState{
-						Element:   resultElem,
-						Available: newAvailable,
-						Steps:     newSteps,
-					}
-					forwardStack.PushBack(state)
+				newSteps := make(map[string][]string)
+				for k, v := range current.Steps {
+					newSteps[k] = append([]string{}, v...)
 				}
-			}
-		}
-	}
+				newSteps[current.Element] = recipe
 
-	// backward dfs
-	for backwardStack.Len() > 0 {
-		current := backwardStack.Remove(backwardStack.Back()).(SearchState)
-		nodesExplored++
-
-		if _, visited := backwardVisited[current.Element]; visited {
-			continue
-		}
-
-		currentTier, ok := tiers[current.Element]
-		if !ok {
-			continue
-		}
-
-		stepsCopy := make(map[string][]string)
-		for k, v := range current.Steps {
-			stepsCopy[k] = append([]string{}, v...)
-		}
-		backwardVisited[current.Element] = stepsCopy
-
-		if forwardSteps, found := forwardVisited[current.Element]; found {
-			allSteps := make(map[string][]string)
-			for k, v := range forwardSteps {
-				allSteps[k] = v
-			}
-			for k, v := range stepsCopy {
-				allSteps[k] = v
-			}
-			if isStepsComplete(allSteps, basicElements) {
-				path := reconstructPath(target, allSteps, basicElements, elements, tiers)
-				if path != nil {
-					return path, allSteps, nodesExplored, time.Since(startTime)
-				}
-			}
-		}
-
-		recipes, hasRecipes := elements[current.Element]
-		if !hasRecipes {
-			continue
-		}
-
-		for _, recipe := range recipes {
-			if len(recipe) != 2 {
-				continue
-			}
-
-			ing1, ing2 := recipe[0], recipe[1]
-			t1, ok1 := tiers[ing1]
-			t2, ok2 := tiers[ing2]
-			if !ok1 || !ok2 || t1 >= currentTier || t2 >= currentTier {
-				continue
-			}
-
-			newSteps := make(map[string][]string)
-			for k, v := range current.Steps {
-				newSteps[k] = append([]string{}, v...)
-			}
-			newSteps[current.Element] = recipe
-
-			// push ing1
-			if isValidElement(ing1, elements, tiers) {
-				if _, visited := backwardVisited[ing1]; !visited {
-					state := SearchState{
-						Element:   ing1,
-						Available: cloneMap(current.Available),
-						Steps:     newSteps,
+				// push ing1
+				if isValidElement(ing1, elements, tiers) {
+					if _, visited := backwardVisited[ing1]; !visited {
+						state := SearchState{
+							Element:   ing1,
+							Available: cloneMap(current.Available),
+							Steps:     newSteps,
+						}
+						state.Available[ing1] = true
+						backwardStack.PushBack(state)
 					}
-					state.Available[ing1] = true
-					backwardStack.PushBack(state)
 				}
-			}
-			// push ing2
-			if isValidElement(ing2, elements, tiers) {
-				if _, visited := backwardVisited[ing2]; !visited {
-					state := SearchState{
-						Element:   ing2,
-						Available: cloneMap(current.Available),
-						Steps:     newSteps,
+				// push ing2
+				if isValidElement(ing2, elements, tiers) {
+					if _, visited := backwardVisited[ing2]; !visited {
+						state := SearchState{
+							Element:   ing2,
+							Available: cloneMap(current.Available),
+							Steps:     newSteps,
+						}
+						state.Available[ing2] = true
+						backwardStack.PushBack(state)
 					}
-					state.Available[ing2] = true
-					backwardStack.PushBack(state)
 				}
 			}
 		}
@@ -439,6 +442,7 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 	fmt.Println("No path found after exploring", nodesExplored, "nodes")
 	return nil, nil, nodesExplored, time.Since(startTime)
 }
+
 func isStepsComplete(steps map[string][]string, basicElements map[string]bool) bool {
 	for _, ingredients := range steps {
 		for _, ing := range ingredients {
