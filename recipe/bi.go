@@ -46,10 +46,12 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 	for elem := range basicElements {
 		forwardQueue.PushBack(elem)
 		forwardVisited[elem] = true
+		nodesExplored++ // Menambah hitungan untuk setiap node awal
 	}
 
 	backwardQueue.PushBack(target)
 	backwardVisited[target] = true
+	nodesExplored++ // Menambah hitungan untuk target node
 
 	meetingPoints := make(map[string]bool)
 
@@ -58,7 +60,7 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 		levelSize := forwardQueue.Len()
 		for i := 0; i < levelSize; i++ {
 			current := forwardQueue.Remove(forwardQueue.Front()).(string)
-			nodesExplored++
+			// Node sudah dihitung saat dimasukkan ke queue
 
 			// cek kalo udh ketemu
 			if backwardVisited[current] {
@@ -67,6 +69,8 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 
 			// coba craft dr basic element dan yg udh dipunya
 			for result, recipes := range elements {
+				nodesExplored++ // Menambah hitungan untuk setiap hasil yang diperiksa
+
 				if forwardVisited[result] {
 					continue
 				}
@@ -78,6 +82,8 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 
 				// loop utk cari variasi resep dari current element
 				for _, recipe := range recipes {
+					nodesExplored++ // Menambah hitungan untuk setiap resep yang diperiksa
+
 					if len(recipe) != 2 {
 						continue
 					}
@@ -96,6 +102,7 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 						forwardParent[result] = current
 						forwardRecipe[result] = []string{ing1, ing2}
 						forwardQueue.PushBack(result)
+						nodesExplored++ // Menambah hitungan untuk node baru yang ditemukan
 
 						if backwardVisited[result] {
 							meetingPoints[result] = true
@@ -106,14 +113,12 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 							break
 						}
 					}
-
 				}
 			}
 		}
 
 		// kalau udh ada yg ketemu
 		if len(meetingPoints) > 0 {
-
 			allSteps := make(map[string][]string)
 
 			for elem, recipe := range forwardRecipe {
@@ -144,7 +149,7 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 		levelSize = backwardQueue.Len()
 		for i := 0; i < levelSize; i++ {
 			current := backwardQueue.Remove(backwardQueue.Front()).(string)
-			nodesExplored++
+			// Node sudah dihitung saat dimasukkan ke queue
 
 			if forwardVisited[current] {
 				meetingPoints[current] = true
@@ -162,6 +167,8 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 			}
 
 			for _, recipe := range elements[current] {
+				nodesExplored++ // Menambah hitungan untuk setiap resep yang diperiksa
+
 				if len(recipe) != 2 {
 					continue
 				}
@@ -179,6 +186,7 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 					if !backwardVisited[ing] {
 						backwardVisited[ing] = true
 						backwardQueue.PushBack(ing)
+						nodesExplored++ // Menambah hitungan untuk ingredien baru yang ditemukan
 						backwardParent[ing] = current
 						backwardIngredient[ing] = []string{ing1, ing2} // simpan resep dari elemen saat ini
 
@@ -199,7 +207,19 @@ func BiSearchBFS(target string, elements map[string][][]string, basicElements ma
 			}
 
 			// add all backward recipes
-			for _ = range meetingPoints {
+			for elem, ingredients := range backwardIngredient {
+				parent := backwardParent[elem]
+				if parent != "" && !basicElements[elem] {
+					allSteps[parent] = ingredients
+				}
+			}
+
+			for meetingPoint := range meetingPoints {
+				// kalo meeting point nya dr bw
+				if recipe, ok := backwardIngredient[meetingPoint]; ok && meetingPoint != target {
+					allSteps[meetingPoint] = recipe
+				}
+
 				path := reconstructPath(target, allSteps, basicElements, elements, tiers)
 				if path != nil {
 					return path, allSteps, nodesExplored, time.Since(startTime)
@@ -227,6 +247,7 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 	backwardVisited := make(map[string]map[string][]string)
 	nodesExplored := 0
 
+	// Inisialisasi forward stack
 	for element := range basicElements {
 		available := make(map[string]bool)
 		for e := range basicElements {
@@ -239,16 +260,21 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 			Steps:     make(map[string][]string),
 		}
 		forwardStack.PushBack(state)
+		nodesExplored++ // Menambah hitungan untuk setiap node awal
 	}
 
+	// Inisialisasi backward stack
 	backwardState := SearchState{
 		Element:   target,
 		Available: map[string]bool{target: true},
 		Steps:     make(map[string][]string),
 	}
+	nodesExplored++ // Menambah hitungan untuk target node
 
 	if recipes, ok := elements[target]; ok {
 		for _, recipe := range recipes {
+			nodesExplored++ // Menambah hitungan untuk setiap resep yang diperiksa
+
 			if len(recipe) == 2 {
 				targetTier, hasTier := tiers[target]
 				ing1Tier, hasIng1 := tiers[recipe[0]]
@@ -270,7 +296,7 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 		// forward dfs step
 		if forwardStack.Len() > 0 {
 			current := forwardStack.Remove(forwardStack.Back()).(SearchState)
-			nodesExplored++
+			// Node sudah dihitung saat dimasukkan ke stack
 
 			if _, visited := forwardVisited[current.Element]; visited {
 				continue
@@ -312,6 +338,8 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 			newAvailable[current.Element] = true
 
 			for resultElem, recipes := range elements {
+				nodesExplored++ // Menambah hitungan untuk setiap elemen hasil yang diperiksa
+
 				if _, visited := forwardVisited[resultElem]; visited {
 					continue
 				}
@@ -321,6 +349,8 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 				}
 
 				for _, recipe := range recipes {
+					nodesExplored++ // Menambah hitungan untuk setiap resep yang diperiksa
+
 					if len(recipe) != 2 {
 						continue
 					}
@@ -347,6 +377,7 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 							Steps:     newSteps,
 						}
 						forwardStack.PushBack(state)
+						nodesExplored++ // Menambah hitungan untuk setiap state baru yang ditambahkan
 					}
 				}
 			}
@@ -355,7 +386,7 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 		// backward dfs step
 		if backwardStack.Len() > 0 {
 			current := backwardStack.Remove(backwardStack.Back()).(SearchState)
-			nodesExplored++
+			// Node sudah dihitung saat dimasukkan ke stack
 
 			if _, visited := backwardVisited[current.Element]; visited {
 				continue
@@ -394,6 +425,8 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 			}
 
 			for _, recipe := range recipes {
+				nodesExplored++ // Menambah hitungan untuk setiap resep yang diperiksa
+
 				if len(recipe) != 2 {
 					continue
 				}
@@ -421,6 +454,7 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 						}
 						state.Available[ing1] = true
 						backwardStack.PushBack(state)
+						nodesExplored++ // Menambah hitungan untuk setiap state baru yang ditambahkan
 					}
 				}
 				// push ing2
@@ -433,6 +467,7 @@ func BiSearchDFS(target string, elements map[string][][]string, basicElements ma
 						}
 						state.Available[ing2] = true
 						backwardStack.PushBack(state)
+						nodesExplored++ // Menambah hitungan untuk setiap state baru yang ditambahkan
 					}
 				}
 			}

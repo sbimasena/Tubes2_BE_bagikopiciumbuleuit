@@ -39,7 +39,6 @@ type Step struct {
 
 func findPathDFS(recipes []ElementRecipe, startElements []string, target string) ([]Path, time.Duration, int) {
 	startTime := time.Now()
-
 	elementMap := make(map[string]ElementRecipe) // just like the json
 	tierMap := make(map[string]int)              // element -> tier
 	recipeMap := make(map[string][][2]string)    // element -> all recipe
@@ -50,12 +49,6 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 		recipeMap[recipe.Element] = append(recipeMap[recipe.Element], recipe.Recipes...)
 	}
 
-	// for _, elem := range startElements {
-	// 	if _, exists := tierMap[elem]; !exists {
-	// 		tierMap[elem] = 1
-	// 	}
-	// }
-
 	basics := make(map[string]bool)
 	for _, e := range startElements {
 		basics[e] = true
@@ -64,8 +57,28 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 	memo := make(map[string]bool)
 	visitedCounter := make(map[string]bool)
 
+	// Tambahkan counter untuk menghitung total node yang dieksplorasi
+	nodesExplored := 0
+
+	// Hitung target sebagai node yang dieksplorasi
+	nodesExplored++
+
+	// Hitung semua elemen dasar
+	for range startElements {
+		nodesExplored++
+	}
+
 	var dfs func(string) *Path
 	dfs = func(current string) *Path {
+		// Hitung current element sebagai node yang dieksplorasi
+		// Kecuali jika sudah pernah dihitung sebelumnya
+		if !visitedCounter[current] {
+			nodesExplored++
+		}
+
+		// Tandai sudah mengunjungi current element
+		visitedCounter[current] = true
+
 		if basics[current] { // return if target = basic elements
 			return &Path{Steps: []Step{}, FinalItem: current}
 		}
@@ -75,15 +88,17 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 			return nil
 		}
 
-		visitedCounter[current] = true
-
 		combos, ok := recipeMap[current] // look for the recipe in recipeMap
 		if !ok {
 			memo[current] = false
 			return nil
 		}
+
 		// check the possible combo
 		for _, combo := range combos {
+			// Hitung setiap resep yang diperiksa
+			nodesExplored++
+
 			a, b := combo[0], combo[1]
 			aTier, aOk := tierMap[a]
 			bTier, bOk := tierMap[b]
@@ -93,7 +108,6 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 			if !aOk || !bOk {
 				continue
 			}
-
 			if resultTier <= max(aTier, bTier) {
 				continue
 			}
@@ -113,7 +127,6 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 			// merge steps without duplicate (pathA and pathB)
 			stepSet := make(map[[3]string]bool)
 			var steps []Step
-
 			for _, s := range pathA.Steps {
 				k := [3]string{s.Ingredients[0], s.Ingredients[1], s.Result}
 				if !stepSet[k] {
@@ -133,6 +146,8 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 			k := [3]string{a, b, current}
 			if !stepSet[k] {
 				steps = append(steps, Step{Ingredients: [2]string{a, b}, Result: current})
+				// Hitung setiap step baru yang ditambahkan
+				nodesExplored++
 			}
 
 			memo[current] = true
@@ -142,14 +157,14 @@ func findPathDFS(recipes []ElementRecipe, startElements []string, target string)
 		memo[current] = false
 		return nil
 	}
+
 	path := dfs(target)
 	duration := time.Since(startTime)
 
 	if path != nil {
-		return []Path{*path}, duration, len(visitedCounter)
+		return []Path{*path}, duration, nodesExplored
 	}
-
-	return nil, duration, len(visitedCounter)
+	return nil, duration, nodesExplored
 }
 
 // LoadRecipes loads element recipes from a JSON file

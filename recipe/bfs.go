@@ -15,23 +15,37 @@ type BFSNode struct {
 func findPathBFS(recipes []ElementRecipe, startElements []string, target string) ([]Path, time.Duration, int) {
 	startTime := time.Now()
 
+	// Tambahkan counter untuk menghitung total node yang dieksplorasi
+	nodesExplored := 0
+
+	// Hitung target node
+	nodesExplored++
+
 	// Lookup maps
 	tierMap := make(map[string]int)
 	recipeMap := make(map[string][][2]string)
 
 	for _, recipe := range recipes {
+		nodesExplored++ // Menghitung setiap resep elemen yang diproses
+
 		tierMap[recipe.Element] = recipe.Tier
 		recipeMap[recipe.Element] = recipe.Recipes
+
 		for _, combo := range recipe.Recipes {
+			nodesExplored++ // Menghitung setiap kombinasi resep
+
 			for _, ing := range combo {
 				if _, exists := tierMap[ing]; !exists {
 					tierMap[ing] = 1
+					nodesExplored++ // Menghitung setiap ingredient baru
 				}
 			}
 		}
 	}
 
 	for _, elem := range startElements {
+		nodesExplored++ // Menghitung setiap elemen dasar
+
 		if _, exists := tierMap[elem]; !exists {
 			tierMap[elem] = 1
 		}
@@ -62,7 +76,13 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 		var elemToExpand string
 
 		for _, elem := range curr.Remaining {
+			// Hitung hanya jika belum pernah dikunjungi sebelumnya
+			if !visitedCounter[elem] {
+				nodesExplored++
+			}
+
 			visitedCounter[elem] = true
+
 			if !basics[elem] {
 				allBasic = false
 				elemToExpand = elem
@@ -77,11 +97,12 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 			return []Path{{
 				Steps:     reversedSteps,
 				FinalItem: target,
-			}}, time.Since(startTime), len(visitedCounter)
+			}}, time.Since(startTime), nodesExplored
 		}
 
 		if curr.Visited[elemToExpand] {
 			newRemaining := removeElement(curr.Remaining, elemToExpand)
+
 			queue = append(queue, BFSNode{
 				Remaining: newRemaining,
 				Steps:     curr.Steps,
@@ -89,6 +110,8 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 				StepSet:   curr.StepSet,
 				Defined:   curr.Defined,
 			})
+
+			nodesExplored++ // Menghitung setiap keadaan BFS baru yang dibuat
 			continue
 		}
 
@@ -101,18 +124,22 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 		}
 
 		for _, combo := range combos {
-			a, b := combo[0], combo[1]
+			nodesExplored++ // Menghitung setiap kombinasi resep yang diperiksa
 
+			a, b := combo[0], combo[1]
 			aTier, aOk := tierMap[a]
 			bTier, bOk := tierMap[b]
 			resultTier := tierMap[elemToExpand]
+
 			if !aOk || !bOk {
 				continue
 			}
+
 			maxTier := aTier
 			if bTier > maxTier {
 				maxTier = bTier
 			}
+
 			if resultTier <= maxTier {
 				continue
 			}
@@ -125,7 +152,6 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 
 			step := Step{Ingredients: [2]string{a, b}, Result: elemToExpand}
 			stepKey := [3]string{a, b, elemToExpand}
-
 			newSteps := make([]Step, len(curr.Steps))
 			copy(newSteps, curr.Steps)
 			newStepSet := copyStepSet(curr.StepSet)
@@ -138,6 +164,7 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 			if !newStepSet[stepKey] {
 				newSteps = append(newSteps, step)
 				newStepSet[stepKey] = true
+				nodesExplored++ // Menghitung setiap langkah baru yang ditambahkan
 			}
 
 			newRemaining := []string{}
@@ -161,10 +188,12 @@ func findPathBFS(recipes []ElementRecipe, startElements []string, target string)
 				StepSet:   newStepSet,
 				Defined:   newDefined, // NEW
 			})
+
+			nodesExplored++ // Menghitung setiap node BFS baru yang ditambahkan ke queue
 		}
 	}
 
-	return nil, time.Since(startTime), len(visitedCounter)
+	return nil, time.Since(startTime), nodesExplored
 }
 
 // Helper function to create a deep copy of the visited map

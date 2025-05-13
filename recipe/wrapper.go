@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -124,10 +125,13 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 	var (
 		paths          [][]string
 		allSteps       []map[string][]string
-		totalNodes     int
 		startTime      = time.Now()
-		pathSignatures = make(map[string]bool, maxPaths) 
+		pathSignatures = make(map[string]bool, maxPaths)
 	)
+
+	// Menggunakan atomic untuk perhitungan yang aman antar goroutines
+	var totalNodesAtomic int64
+
 	fmt.Println("Finding up to", maxPaths, "different paths for", target)
 
 	var wg sync.WaitGroup
@@ -135,32 +139,62 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 		path  []string
 		steps map[string][]string
 		nodes int
-	}, maxPaths)
+	}, maxPaths*3) // Memperbesar buffer channel agar tidak blocking
 
-	attemptsToRun := maxPaths * 3 
-	
+	// Membatasi percobaan
+	attemptsToRun := maxPaths * 3
+
+	// Mutex untuk mengontrol akses ke pathSignatures
+	var pathMutex sync.Mutex
+
+	// Atomic untuk mengontrol apakah sudah cukup path
+	var foundEnoughPaths int32
+
 	for attempt := 0; attempt < attemptsToRun; attempt++ {
 		wg.Add(1)
 		go func(attemptNum int) {
 			defer wg.Done()
 
-			if len(pathSignatures) >= maxPaths {
+			// Cek apakah sudah cukup path unik
+			if atomic.LoadInt32(&foundEnoughPaths) > 0 {
 				return
 			}
 
 			elementsCopy := copyElements(elements)
 			shuffleRecipes(elementsCopy, attemptNum)
-
 			path, steps, nodes, _ := BiSearchBFS(target, elementsCopy, basicElements, tierMap)
+
+			// Selalu tambahkan jumlah nodes yang dieksplorasi, berhasil atau tidak
+			atomic.AddInt64(&totalNodesAtomic, int64(nodes))
+
 			if path == nil {
 				return
 			}
 
-			resultChan <- struct {
-				path  []string
-				steps map[string][]string
-				nodes int
-			}{path, steps, nodes}
+			// Cek apakah path ini unik
+			signature := hashPath(path)
+			pathMutex.Lock()
+			isDuplicate := pathSignatures[signature]
+			if !isDuplicate && len(pathSignatures) < maxPaths {
+				pathSignatures[signature] = true
+			}
+			pathMutex.Unlock()
+
+			// Jika bukan duplikat dan masih butuh path, kirim hasilnya
+			if !isDuplicate && len(pathSignatures) <= maxPaths {
+				resultChan <- struct {
+					path  []string
+					steps map[string][]string
+					nodes int
+				}{path, steps, nodes}
+
+				// Jika sudah cukup path, set flag
+				pathMutex.Lock()
+				if len(pathSignatures) >= maxPaths {
+					atomic.StoreInt32(&foundEnoughPaths, 1)
+				}
+				pathMutex.Unlock()
+			}
 		}(attempt)
 	}
 
@@ -170,25 +204,17 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 	}()
 
 	for result := range resultChan {
-		// Early exit if we have enough paths
-		if len(paths) >= maxPaths {
-			break
-		}
-
-		signature := hashPath(result.path)
-		if pathSignatures[signature] {
-			continue
-		}
-
-		pathSignatures[signature] = true
+		// Path yang dikirim sudah diverifikasi unik, jadi langsung tambahkan
 		paths = append(paths, result.path)
 		allSteps = append(allSteps, result.steps)
-		totalNodes += result.nodes
 
 		if len(paths) >= maxPaths {
 			break
 		}
 	}
+
+	// Ambil nilai akhir total nodes dari atomic counter
+	totalNodes := int(atomic.LoadInt64(&totalNodesAtomic))
 
 	duration := time.Since(startTime)
 	fmt.Printf("Total nodes explored: %d\n", totalNodes)
@@ -205,7 +231,7 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 
 func hashPath(path []string) string {
 	var b strings.Builder
-	b.Grow(len(path) * 16) 
+	b.Grow(len(path) * 16)
 
 	for i, elem := range path {
 		if i > 0 {
