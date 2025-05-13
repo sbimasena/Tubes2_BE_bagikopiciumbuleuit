@@ -22,6 +22,25 @@ Seluruh data elemen dan kombinasi crafting diambil langsung melalui proses scrap
 
 ---
 
+## Dependensi
+### Node Package Manager 
+```bash
+cd fe
+npm install
+npm run dev
+```
+### Golang
+Kunjungi situs resmi Go:
+
+[https://go.dev/dl](https://go.dev/dl)
+
+---
+
+### Untuk Windows
+
+Akses web [https://go.dev/doc/install](https://go.dev/doc/install) dan sesuaikan versi OS
+
+
 ## Cara Menjalankan Aplikasi
 
 ### Melalui Website 
@@ -29,32 +48,41 @@ ttps://your-deploy-url-here.com
 
 ### Melalui Docker
 
-```bash
 # 1. Buat terlebih dahulu network docker
+```bash
 docker network create kejucraft-net
-
+```
 # 2. Jalankan backend
+```
 cd be
 docker compose up
+```
 
 # 3. Jalankan frontend (di terminal baru)
+```
 cd ../fe
 docker compose up
+```
 
-### Melalui Docker
+### Melalui Local Terminal
 
 # 1. Clone dua repository berikut dan tempatkan dalam satu folder
+```
 git clone https://github.com/sbimasena/Tubes2_FE_bagikopiciumbuleuit.git ke dalam folder fe
 git clone https://github.com/sbimasena/Tubes2_BE_bagikopiciumbuleuit.git ke dalam folder be
-
+```
 # 2. Jalankan Frontend (React + Next.js)
+```
 cd fe/kejucraft
 npm install
 npm run dev
+```
 
 # 3. Jalankan Backend (Golang)
+```
 cd ../be
 go run *.go
+```
 
 ## Kontributor
 
