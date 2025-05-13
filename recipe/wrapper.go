@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type ElementData struct {
@@ -27,6 +29,13 @@ type SearchResult struct {
 	NodesVisited int                   `json:"nodes_visited"`
 	Duration     string                `json:"duration"`
 	Algorithm    string                `json:"algorithm"`
+}
+
+type StepMessage struct {
+	Type     string `json:"type"` // "step" atau "done"
+	Step     *Step  `json:"step,omitempty"`
+	Visited  int    `json:"visited,omitempty"`
+	Duration string `json:"duration,omitempty"`
 }
 
 func FindSingleRecipeBi(
@@ -126,7 +135,7 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 		allSteps       []map[string][]string
 		totalNodes     int
 		startTime      = time.Now()
-		pathSignatures = make(map[string]bool, maxPaths) 
+		pathSignatures = make(map[string]bool, maxPaths)
 	)
 	fmt.Println("Finding up to", maxPaths, "different paths for", target)
 
@@ -137,8 +146,8 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 		nodes int
 	}, maxPaths)
 
-	attemptsToRun := maxPaths * 3 
-	
+	attemptsToRun := maxPaths * 3
+
 	for attempt := 0; attempt < attemptsToRun; attempt++ {
 		wg.Add(1)
 		go func(attemptNum int) {
@@ -205,7 +214,7 @@ func BiSearchMultipleBFS(target string, elements map[string][][]string, basicEle
 
 func hashPath(path []string) string {
 	var b strings.Builder
-	b.Grow(len(path) * 16) 
+	b.Grow(len(path) * 16)
 
 	for i, elem := range path {
 		if i > 0 {
@@ -835,4 +844,278 @@ func shuffleRecipes(elements map[string][][]string, seed int) {
 		}
 		elements[elem] = recipes
 	}
+}
+
+// Single DFS live
+func FindSingleRecipeDFSLive(recipes []ElementRecipe, target string, starting []string, conn *websocket.Conn) error {
+	path, visited, duration := DFSWithCallback(recipes, starting, target, func(step Step) {
+		msg := StepMessage{
+			Type: "step",
+			Step: &step,
+		}
+		conn.WriteJSON(msg)
+	})
+
+	if path == nil {
+		return fmt.Errorf("no path found")
+	}
+
+	conn.WriteJSON(StepMessage{
+		Type:     "done",
+		Visited:  visited,
+		Duration: duration.String(),
+	})
+	return nil
+}
+
+// Single BFS live
+func FindSingleRecipeBFSLive(recipes []ElementRecipe, target string, starting []string, conn *websocket.Conn) error {
+	path, visited, duration := BFSWithCallback(recipes, starting, target, func(step Step) {
+		msg := StepMessage{
+			Type: "step",
+			Step: &step,
+		}
+		conn.WriteJSON(msg)
+	})
+
+	if path == nil {
+		return fmt.Errorf("no path found")
+	}
+
+	conn.WriteJSON(StepMessage{
+		Type:     "done",
+		Visited:  visited,
+		Duration: duration.String(),
+	})
+	return nil
+}
+
+func FindMultipleRecipesDFSLive(recipes []ElementRecipe, target string, starting []string, maxPaths int, conn *websocket.Conn) error {
+	sendStep := func(step Step) {
+		msg := StepMessage{
+			Type: "step",
+			Step: &step,
+		}
+		conn.WriteJSON(msg)
+	}
+
+	_, visited, duration := DFSAllWithCallback(recipes, starting, target, maxPaths, sendStep)
+
+	conn.WriteJSON(StepMessage{
+		Type:     "done",
+		Visited:  visited,
+		Duration: duration.String(),
+	})
+	return nil
+}
+
+func FindMultipleRecipesBFSLive(recipes []ElementRecipe, target string, starting []string, maxPaths int, conn *websocket.Conn) error {
+	sendStep := func(step Step) {
+		msg := StepMessage{
+			Type: "step",
+			Step: &step,
+		}
+		conn.WriteJSON(msg)
+	}
+
+	_, visited, duration := BFSAllWithCallback(recipes, starting, target, maxPaths, sendStep)
+
+	conn.WriteJSON(StepMessage{
+		Type:     "done",
+		Visited:  visited,
+		Duration: duration.String(),
+	})
+	return nil
+}
+
+func DFSWithCallback(recipes []ElementRecipe, startingElements []string, target string, onStep func(Step)) ([]Step, int, time.Duration) {
+	visited := make(map[string]bool)
+	var result []Step
+	start := time.Now()
+	var nodesVisited int
+
+	var dfs func(curr string) bool
+	dfs = func(curr string) bool {
+		nodesVisited++
+		if contains(startingElements, curr) {
+			return true
+		}
+		for _, recipe := range recipes {
+			if recipe.Element != curr {
+				continue
+			}
+			for _, ing := range recipe.Recipes {
+				if visited[curr] {
+					continue
+				}
+				visited[curr] = true
+				if dfs(ing[0]) && dfs(ing[1]) {
+					step := Step{Ingredients: ing, Result: curr}
+					onStep(step)
+					result = append(result, step)
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	if !dfs(target) {
+		return nil, nodesVisited, time.Since(start)
+	}
+
+	return result, nodesVisited, time.Since(start)
+}
+
+// BFS SINGLE PATH WITH CALLBACK
+func BFSWithCallback(recipes []ElementRecipe, startingElements []string, target string, onStep func(Step)) ([]Step, int, time.Duration) {
+	start := time.Now()
+	type Node struct {
+		Name  string
+		Path  []Step
+		Known map[string]bool
+	}
+
+	queue := []Node{{Name: "", Known: map[string]bool{}, Path: nil}}
+	elements := make(map[string]bool)
+	for _, e := range startingElements {
+		elements[e] = true
+	}
+
+	for {
+		if len(queue) == 0 {
+			return nil, len(elements), time.Since(start)
+		}
+		n := queue[0]
+		queue = queue[1:]
+
+		for _, recipe := range recipes {
+			for _, ing := range recipe.Recipes {
+				if elements[ing[0]] && elements[ing[1]] && !elements[recipe.Element] {
+					newStep := Step{Ingredients: ing, Result: recipe.Element}
+					onStep(newStep)
+					newPath := append([]Step{}, n.Path...)
+					newPath = append(newPath, newStep)
+					if recipe.Element == target {
+						return newPath, len(elements), time.Since(start)
+					}
+					elements[recipe.Element] = true
+					queue = append(queue, Node{Name: recipe.Element, Path: newPath})
+				}
+			}
+		}
+	}
+}
+
+// DFS MULTIPLE PATHS WITH CALLBACK (for concurrent mode)
+func DFSAllWithCallback(recipes []ElementRecipe, startingElements []string, target string, maxPaths int, onStep func(Step)) ([][]Step, int, time.Duration) {
+	var results [][]Step
+	start := time.Now()
+	var nodesVisited int
+	var path []Step
+
+	var dfs func(curr string) bool
+	dfs = func(curr string) bool {
+		if len(results) >= maxPaths {
+			return true
+		}
+		nodesVisited++
+		if contains(startingElements, curr) {
+			return true
+		}
+		for _, recipe := range recipes {
+			if recipe.Element != curr {
+				continue
+			}
+			for _, ing := range recipe.Recipes {
+				step := Step{Ingredients: ing, Result: curr}
+				if dfs(ing[0]) && dfs(ing[1]) {
+					path = append(path, step)
+					onStep(step)
+					if curr == target {
+						copyPath := make([]Step, len(path))
+						copy(copyPath, path)
+						results = append(results, copyPath)
+					}
+					path = path[:len(path)-1]
+				}
+			}
+		}
+		return false
+	}
+
+	dfs(target)
+	return results, nodesVisited, time.Since(start)
+}
+
+func BFSAllWithCallback(recipes []ElementRecipe, startingElements []string, target string, maxPaths int, onStep func(Step)) ([][]Step, int, time.Duration) {
+	start := time.Now()
+	type Node struct {
+		Name string
+		Path []Step
+	}
+	queue := []Node{}
+	foundPaths := [][]Step{}
+	visited := make(map[string]bool)
+	known := make(map[string]bool)
+	for _, e := range startingElements {
+		known[e] = true
+	}
+
+	for {
+		if len(queue) == 0 && len(foundPaths) == 0 {
+			// Initial expansion
+			for _, r := range recipes {
+				for _, ing := range r.Recipes {
+					if known[ing[0]] && known[ing[1]] && !known[r.Element] {
+						step := Step{Ingredients: ing, Result: r.Element}
+						onStep(step)
+						queue = append(queue, Node{
+							Name: r.Element,
+							Path: []Step{step},
+						})
+						known[r.Element] = true
+					}
+				}
+			}
+		}
+
+		if len(queue) == 0 || len(foundPaths) >= maxPaths {
+			break
+		}
+
+		n := queue[0]
+		queue = queue[1:]
+		if n.Name == target {
+			foundPaths = append(foundPaths, n.Path)
+			continue
+		}
+
+		for _, r := range recipes {
+			if r.Element == n.Name {
+				continue
+			}
+			for _, ing := range r.Recipes {
+				if !visited[r.Element] && known[ing[0]] && known[ing[1]] {
+					step := Step{Ingredients: ing, Result: r.Element}
+					onStep(step)
+					newPath := append([]Step{}, n.Path...)
+					newPath = append(newPath, step)
+					queue = append(queue, Node{Name: r.Element, Path: newPath})
+					visited[r.Element] = true
+				}
+			}
+		}
+	}
+
+	return foundPaths, len(known), time.Since(start)
+}
+
+func contains(slice []string, val string) bool {
+	for _, item := range slice {
+		if item == val {
+			return true
+		}
+	}
+	return false
 }

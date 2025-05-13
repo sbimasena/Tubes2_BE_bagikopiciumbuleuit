@@ -7,166 +7,55 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+
+	"github.com/gorilla/websocket"
 )
 
-// func isElementInRecipes(target string, elements []recipe.ElementData) bool {
-// 	for _, element := range elements {
-// 		if element.Element == target {
-// 			return true
-// 		}
-// 	}
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow all origins (untuk development)
+	},
+}
 
-// 	return false
-// }
+func handleLiveSearch(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("WebSocket upgrade error:", err)
+		return
+	}
+	defer conn.Close()
 
-// func main() {
-// 	reader := bufio.NewReader(os.Stdin)
-// 	log.Print("Scraping atau tidak? (y/n): ")
-// 	scrape, _ := reader.ReadString('\n')
-// 	scrape = strings.TrimSpace(strings.ToLower(scrape))
-// 	if scrape == "y" {
-// 		log.Println("Melakukan scraping...")
-// 		mainScrap()
-// 	}
-// 	log.Print("Pilih algoritma utama (bfs/dfs/bidirectional): ")
-// 	mainAlg, _ := reader.ReadString('\n')
-// 	mainAlg = strings.TrimSpace(strings.ToLower(mainAlg))
+	type SearchRequest struct {
+		Target    string `json:"target"`
+		Algorithm string `json:"algorithm"`
+	}
 
-// 	var bidiAlg string
-// 	if mainAlg == "bidirectional" {
-// 		log.Print("Pilih metode bidirectional (bfs/dfs): ")
-// 		bidiAlgRaw, _ := reader.ReadString('\n')
-// 		bidiAlg = strings.TrimSpace(strings.ToLower(bidiAlgRaw))
-// 		if bidiAlg != "bfs" && bidiAlg != "dfs" {
-// 			log.Println("Metode bidirectional tidak valid, gunakan bfs atau dfs.")
-// 			return
-// 		}
-// 	}
+	var req SearchRequest
+	if err := conn.ReadJSON(&req); err != nil {
+		log.Println("ReadJSON error:", err)
+		return
+	}
 
-// 	log.Print("Ingin mencari satu resep atau banyak? (1/multiple): ")
-// 	mode, _ := reader.ReadString('\n')
-// 	mode = strings.TrimSpace(strings.ToLower(mode))
+	elements, err := recipe.LoadElements("recipes.json")
+	if err != nil {
+		conn.WriteMessage(websocket.TextMessage, []byte("error: failed to load recipes"))
+		return
+	}
+	recipeMap, _, basicElements := recipe.PrepareElementMaps(elements)
 
-// 	maxPaths := 1
-// 	if mode == "multiple" {
-// 		log.Print("Berapa jumlah maksimum resep yang ingin dicari? ")
-// 		input, _ := reader.ReadString('\n')
-// 		input = strings.TrimSpace(input)
-// 		val, err := strconv.Atoi(input)
-// 		if err == nil && val > 0 {
-// 			maxPaths = val
-// 		}
-// 	}
-
-// 	elements, err := recipe.LoadElements("recipes.json")
-// 	if err != nil {
-// 		log.Println("Gagal membaca file recipes.json:", err)
-// 		return
-// 	}
-
-// 	log.Print("Masukkan nama elemen target: ")
-// 	target, _ := reader.ReadString('\n')
-// 	target = strings.TrimSpace(target)
-
-// 	if target == "" || target == " " || target == "\n" {
-// 		log.Println("Nama elemen target tidak boleh kosong.")
-// 		return
-// 	}
-
-// 	if !isElementInRecipes(target, elements) {
-// 		log.Println("Elemen target tidak ditemukan dalam database.")
-// 		return
-// 	}
-
-// 	recipeMap, tierMap, basicElements := recipe.PrepareElementMaps(elements)
-
-// 	var (
-// 		paths [][]string
-// 		steps []map[string][]string
-// 	)
-
-// 	switch mainAlg {
-// 	case "dfs":
-// 		if mode == "multiple" {
-// 			recipe.FindMultipleRecipesConcurrent("recipes.json", target, keys(basicElements), maxPaths)
-// 			return
-// 		} else {
-// 			recipe.FindSingleRecipeDFS("recipes.json", target, keys(basicElements))
-// 			return
-// 		}
-// 	case "bidirectional":
-// 		if bidiAlg == "dfs" {
-// 			if mode == "multiple" {
-// 				paths, steps, _ = recipe.FindMultipleRecipes(target, recipeMap, basicElements, "dfs", maxPaths, tierMap)
-// 			} else {
-// 				path, step, visited, dur := recipe.FindSingleRecipe(target, recipeMap, basicElements, "dfs", tierMap)
-// 				if path != nil {
-// 					paths = append(paths, path)
-// 					steps = append(steps, step)
-// 					log.Println("\nTotal simpul yang dieksplorasi:", visited)
-// 					log.Println("Waktu eksekusi:", dur)
-// 				}
-// 			}
-// 		} else {
-// 			if mode == "multiple" {
-// 				paths, steps, _ = recipe.FindMultipleRecipes(target, recipeMap, basicElements, "bfs", maxPaths, tierMap)
-// 			} else {
-// 				path, step, visited, dur := recipe.FindSingleRecipe(target, recipeMap, basicElements, "bfs", tierMap)
-// 				if path != nil {
-// 					paths = append(paths, path)
-// 					steps = append(steps, step)
-// 					log.Println("\nTotal simpul yang dieksplorasi:", visited)
-// 					log.Println("Waktu eksekusi:", dur)
-// 				}
-// 			}
-// 		}
-// 	default: // bfs
-// 		if mode == "multiple" {
-// 			recipe.FindMultipleRecipesBFSConcurrent("recipes.json", target, keys(basicElements), maxPaths)
-// 		} else {
-// 			recipe.FindSingleRecipeBFS("recipes.json", target, keys(basicElements))
-// 			return
-// 		}
-// 	}
-
-// 	log.Println("\nHasil:")
-// 	log.Printf("Ditemukan %d jalur resep.\n", len(paths))
-
-// 	for i := range paths {
-// 		stepMap := steps[i]
-// 		log.Printf("\nResep ke-%d:\n", i+1)
-// 		counter := 1
-// 		printed := make(map[string]bool)
-
-// 		var printSteps func(res string)
-// 		printSteps = func(res string) {
-// 			if printed[res] {
-// 				return
-// 			}
-// 			ing, ok := stepMap[res]
-// 			if !ok {
-// 				return
-// 			}
-// 			printSteps(ing[0])
-// 			printSteps(ing[1])
-// 			log.Printf("%d. %s + %s = %s\n", counter, ing[0], ing[1], res)
-// 			counter++
-// 			printed[res] = true
-// 		}
-// 		printSteps(target)
-// 	}
-// }
-
-// func keys(m map[string]bool) []string {
-// 	var out []string
-// 	for k := range m {
-// 		out = append(out, k)
-// 	}
-// 	return out
-// }
+	switch req.Algorithm {
+	case "dfs":
+		recipe.FindSingleRecipeDFSLive(elements, req.Target, []string{"Air", "Earth", "Fire", "Water"}, conn)
+	default:
+		conn.WriteMessage(websocket.TextMessage, []byte("error: unsupported algorithm"))
+	}
+}
 
 func main() {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/ws/search", handleLiveSearch)
 
 	// 🔍 SEARCH HANDLER
 	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
