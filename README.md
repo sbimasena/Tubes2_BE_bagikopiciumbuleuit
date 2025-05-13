@@ -42,18 +42,22 @@ Kunjungi situs resmi Go dan sesuaikan dengan versi OS:
 ttps://your-deploy-url-here.com
 
 ### Melalui Docker
-
-#### 1. Buat terlebih dahulu network docker
+#### 1. Clone dua repository berikut dan tempatkan dalam satu folder
+```
+git clone https://github.com/sbimasena/Tubes2_FE_bagikopiciumbuleuit.git ke dalam folder fe
+git clone https://github.com/sbimasena/Tubes2_BE_bagikopiciumbuleuit.git ke dalam folder be
+```
+#### 2. Buat terlebih dahulu network docker
 ```bash
 docker network create kejucraft-net
 ```
-#### 2. Jalankan backend
+#### 3. Jalankan backend
 ```
 cd be
 docker compose up
 ```
 
-#### 3. Jalankan frontend (di terminal baru)
+#### 4. Jalankan frontend (di terminal baru)
 ```
 cd ../fe
 docker compose up
