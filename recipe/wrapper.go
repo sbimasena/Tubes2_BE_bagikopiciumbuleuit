@@ -896,6 +896,8 @@ func FindMultipleRecipesDFSLive(recipes []ElementRecipe, target string, starting
 			Type: "step",
 			Step: &step,
 		}
+		fmt.Println("🧪 DFS STEP:", step)
+		time.Sleep(100 * time.Millisecond)
 		conn.WriteJSON(msg)
 	}
 
@@ -906,6 +908,7 @@ func FindMultipleRecipesDFSLive(recipes []ElementRecipe, target string, starting
 		Visited:  visited,
 		Duration: duration.String(),
 	})
+
 	return nil
 }
 
@@ -928,11 +931,16 @@ func FindMultipleRecipesBFSLive(recipes []ElementRecipe, target string, starting
 	return nil
 }
 
-func DFSWithCallback(recipes []ElementRecipe, startingElements []string, target string, onStep func(Step)) ([]Step, int, time.Duration) {
+func DFSWithCallback(
+	recipes []ElementRecipe,
+	startingElements []string,
+	target string,
+	onStep func(Step),
+) ([]Step, int, time.Duration) {
 	visited := make(map[string]bool)
-	var result []Step
 	start := time.Now()
 	var nodesVisited int
+	var path []Step
 
 	var dfs func(curr string) bool
 	dfs = func(curr string) bool {
@@ -940,19 +948,21 @@ func DFSWithCallback(recipes []ElementRecipe, startingElements []string, target 
 		if contains(startingElements, curr) {
 			return true
 		}
+		if visited[curr] {
+			return false
+		}
+		visited[curr] = true
+
 		for _, recipe := range recipes {
 			if recipe.Element != curr {
 				continue
 			}
 			for _, ing := range recipe.Recipes {
-				if visited[curr] {
-					continue
-				}
-				visited[curr] = true
 				if dfs(ing[0]) && dfs(ing[1]) {
-					step := Step{Ingredients: ing, Result: curr}
-					onStep(step)
-					result = append(result, step)
+					path = append(path, Step{
+						Ingredients: ing,
+						Result:      curr,
+					})
 					return true
 				}
 			}
@@ -960,11 +970,17 @@ func DFSWithCallback(recipes []ElementRecipe, startingElements []string, target 
 		return false
 	}
 
-	if !dfs(target) {
+	ok := dfs(target)
+	if !ok {
 		return nil, nodesVisited, time.Since(start)
 	}
 
-	return result, nodesVisited, time.Since(start)
+	// Kirim step secara terbalik, agar dari akar ke target
+	for i := len(path) - 1; i >= 0; i-- {
+		onStep(path[i])
+	}
+
+	return path, nodesVisited, time.Since(start)
 }
 
 // BFS SINGLE PATH WITH CALLBACK
@@ -986,6 +1002,7 @@ func BFSWithCallback(recipes []ElementRecipe, startingElements []string, target 
 		if len(queue) == 0 {
 			return nil, len(elements), time.Since(start)
 		}
+
 		n := queue[0]
 		queue = queue[1:]
 
@@ -993,10 +1010,13 @@ func BFSWithCallback(recipes []ElementRecipe, startingElements []string, target 
 			for _, ing := range recipe.Recipes {
 				if elements[ing[0]] && elements[ing[1]] && !elements[recipe.Element] {
 					newStep := Step{Ingredients: ing, Result: recipe.Element}
-					onStep(newStep)
 					newPath := append([]Step{}, n.Path...)
 					newPath = append(newPath, newStep)
 					if recipe.Element == target {
+						// hanya kirim step kalau path valid ke target
+						for _, step := range newPath {
+							onStep(step)
+						}
 						return newPath, len(elements), time.Since(start)
 					}
 					elements[recipe.Element] = true
