@@ -39,7 +39,7 @@ Kunjungi situs resmi Go dan sesuaikan dengan versi OS:
 ## Cara Menjalankan Aplikasi
 
 ### Melalui Website 
-ttps://your-deploy-url-here.com
+https://kejucraft.vercel.app
 
 ### Melalui Docker
 #### 1. Clone dua repository berikut dan tempatkan dalam satu folder
