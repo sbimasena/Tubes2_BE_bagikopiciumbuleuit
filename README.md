@@ -30,16 +30,11 @@ npm install
 npm run dev
 ```
 ### Golang
-Kunjungi situs resmi Go:
+Kunjungi situs resmi Go dan sesuaikan dengan versi OS:
 
 [https://go.dev/dl](https://go.dev/dl)
 
 ---
-
-### Untuk Windows
-
-Akses web [https://go.dev/doc/install](https://go.dev/doc/install) dan sesuaikan versi OS
-
 
 ## Cara Menjalankan Aplikasi
 
