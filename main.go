@@ -90,6 +90,7 @@ func handleLiveSearch(w http.ResponseWriter, r *http.Request) {
 		conn.WriteJSON(map[string]string{"error": "unsupported algorithm"})
 	}
 }
+
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws/search", handleLiveSearch)
