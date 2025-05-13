@@ -28,8 +28,10 @@ func handleLiveSearch(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	type SearchRequest struct {
-		Target    string `json:"target"`
-		Algorithm string `json:"algorithm"`
+		Target    string   `json:"target"`
+		Algorithm string   `json:"algorithm"`
+		MaxPaths  int      `json:"maxPaths"`
+		Starting  []string `json:"starting"`
 	}
 
 	var req SearchRequest
@@ -38,21 +40,56 @@ func handleLiveSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set default values if not provided
+	if req.MaxPaths <= 0 {
+		req.MaxPaths = 5 // Default maximum paths for multiple path algorithms
+	}
+	if len(req.Starting) == 0 {
+		req.Starting = []string{"Air", "Earth", "Fire", "Water"} // Default starting elements
+	}
+
 	elements, err := recipe.LoadElements("recipes.json")
 	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("error: failed to load recipes"))
+		conn.WriteJSON(map[string]string{"error": "failed to load recipes"})
 		return
 	}
-	recipeMap, _, basicElements := recipe.PrepareElementMaps(elements)
+
+	// Convert ElementData to ElementRecipe
+	searchRecipes := make([]recipe.ElementRecipe, 0, len(elements))
+	for _, element := range elements {
+		recipeItem := recipe.ElementRecipe{
+			Element:  element.Element,
+			ImageURL: element.ImageURL,
+			Tier:     element.Tier,
+			Recipes:  make([][2]string, 0),
+		}
+
+		for _, combination := range element.Recipes {
+			if len(combination) == 2 {
+				recipeItem.Recipes = append(recipeItem.Recipes, [2]string{combination[0], combination[1]})
+			}
+		}
+
+		searchRecipes = append(searchRecipes, recipeItem)
+	}
 
 	switch req.Algorithm {
 	case "dfs":
-		recipe.FindSingleRecipeDFSLive(elements, req.Target, []string{"Air", "Earth", "Fire", "Water"}, conn)
+		// Single path DFS
+		recipe.FindSingleRecipeDFSLive(searchRecipes, req.Target, req.Starting, conn)
+	case "bfs":
+		// Single path BFS
+		recipe.FindSingleRecipeBFSLive(searchRecipes, req.Target, req.Starting, conn)
+	case "dfs-multi":
+		// Multiple paths DFS
+		recipe.FindMultipleRecipesDFSLive(searchRecipes, req.Target, req.Starting, req.MaxPaths, conn)
+	case "bfs-multi":
+		// Multiple paths BFS
+		recipe.FindMultipleRecipesBFSLive(searchRecipes, req.Target, req.Starting, req.MaxPaths, conn)
 	default:
-		conn.WriteMessage(websocket.TextMessage, []byte("error: unsupported algorithm"))
+		conn.WriteJSON(map[string]string{"error": "unsupported algorithm"})
 	}
 }
-
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws/search", handleLiveSearch)
